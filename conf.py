@@ -5,8 +5,9 @@ EPOCHS = 40
 LMLR = 3e-6
 LINEARLR = 1e-3
 MAXLENGTH = 50
-LM = "vinai/bertweet-base"
-MODLENAME = "ttt"
+LM = "roberta-base"
+MODLENAME = "40epochs_finished_roberta_7class"
+# MODLENAME = "40epochs_finished_roberta_7class"
 CLASSNUM = 7  # 2
 
 MULTI_CLASS_WEIGHT = [1., 0.0585, 0.0447, 0.0137, 0.0321, 0.0204, 0.0222]

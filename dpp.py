@@ -82,12 +82,13 @@ def train(lm, n, ncls, batchsize=conf.BATCHSIZE):
                     f"   == step: [{idx + 1:3}/{len(train_loader)}] [{ep}/{conf.EPOCHS}] | loss: {loss_:.3f} | acc: {acc:6.3f}%")
                 if acc > best_acc:
                     best_acc = acc
-                    torch.save(model.state_dict(),
+                    torch.save(model.module.state_dict(),
                                f"./models/best_acc_{acc:6.3f}%_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
     if rank == 0:
         print("\n            =======  Training Finished  ======= \n")
 
-    torch.save(model.state_dict(), f"./models/{conf.EPOCHS}epochs_finished_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
+        torch.save(model.module.state_dict(),
+                   f"./models/{conf.EPOCHS}epochs_finished_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
 
 
 if __name__ == '__main__':
