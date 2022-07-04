@@ -1,5 +1,5 @@
 import numpy as np
-
+from transformers import AutoTokenizer, BertForSequenceClassification, RobertaForSequenceClassification
 from utils import MyDataset, MyModel
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
@@ -25,12 +25,16 @@ if __name__ == '__main__':
 
     device = "cuda:2"
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
-    model = MyModel(tokenizer.vocab_size, conf)
-    model.load_state_dict(torch.load(f"./models/{conf.MODLENAME}.pt", map_location=device))
+    if conf.LM in ["vinai/bertweet-base", "roberta-base"]:
+        model = RobertaForSequenceClassification.from_pretrained(conf.LM, num_labels=conf.CLASSNUM).to(device)
+    elif conf.LM == "bert-base-cased":
+        model = BertForSequenceClassification.from_pretrained(conf.LM, num_labels=conf.CLASSNUM).to(device)
+
+    model.load_state_dict(torch.load(f"./models/banlanced/{conf.MODLENAME}.pt", map_location=device))
     model.to(device)
 
     dataset = MyDataset(tokenizer, conf, istrain=False)
-    train_loader = DataLoader(
+    test_loader = DataLoader(
         dataset,
         batch_size=64,
         num_workers=4,
@@ -40,14 +44,14 @@ if __name__ == '__main__':
     model.eval()
     with torch.no_grad():
         pred, truth = [], []
-        for inputs, labels in tqdm(train_loader):
+        for inputs, labels in tqdm(test_loader):
             for k in inputs.keys():
                 inputs[k] = inputs[k].to(device).squeeze()
             truth += list(labels.numpy())
             # print(inputs["input_ids"].shape)
-            outputs = model(inputs)
-            outputs = outputs.argmax(dim=1)
+            outputs = model(**inputs)
+            outputs = outputs.logits.argmax(dim=1)
             pred += list(outputs.cpu().numpy())
-    average = "macro"
+    average = "micro"
     print(
         f"P: {precision_score(truth, pred, average=average):6.3f}%, R: {recall_score(truth, pred, average=average):6.3f}%, F1: {f1_score(truth, pred, average=average):6.3f}%")

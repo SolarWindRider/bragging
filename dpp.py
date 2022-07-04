@@ -12,6 +12,7 @@ import os
 import torch
 
 
+# DDP分布式训练
 def train(lm, n, ncls, batchsize=conf.BATCHSIZE):
     conf.LM = lm
     conf.MODLENAME = n
@@ -92,7 +93,6 @@ def train(lm, n, ncls, batchsize=conf.BATCHSIZE):
 
 
 if __name__ == '__main__':
-    # 0. set up distributed device
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(rank % torch.cuda.device_count())
