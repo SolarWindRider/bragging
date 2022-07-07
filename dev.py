@@ -1,18 +1,13 @@
-import pandas as pd
+import numpy as np
+from transformers import AutoTokenizer, BertForSequenceClassification, RobertaForSequenceClassification
+from utils import MyDataset, MyModel
+from transformers import AutoTokenizer
+import conf
+import torch
 
-MULTI_CLASS_MAP = {
-    "not": 0,  # 2838
-    "achievement": 1,  # 166
-    "action": 2,  # 127
-    "feeling": 3,  # 39
-    "trait": 4,  # 91
-    "possession": 5,  # 58
-    "affiliation": 6,  # 63
-}
-df = pd.read_csv("./dataset/bragging_data.csv")
-for k in MULTI_CLASS_MAP.keys():
-    _ = df[(df["label"] == k) & (df["sampling"] == "keyword")]
-    for i in range(2838 // len(_.values) - 1):
-        df = pd.concat([df, _], axis=0)
+tokenizer = AutoTokenizer.from_pretrained(conf.LM)
+tokens = tokenizer("how are you ?", return_tensors="pt",
+                        max_length=conf.MAXLENGTH, padding="max_length",
+                        truncation=True)
 
-df.to_csv("./dataset/balanced.csv")
+print(tokens)

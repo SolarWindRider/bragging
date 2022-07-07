@@ -1,8 +1,8 @@
-from utils import MyDataset
-from transformers import AutoTokenizer, BertForSequenceClassification, RobertaForSequenceClassification, \
-    get_linear_schedule_with_warmup
+from utils import MyDataset, MyModel
+from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 from torch.utils.data import DataLoader
 from torch.optim import SGD
+from torch.nn import CrossEntropyLoss
 import conf
 from tqdm import tqdm
 import argparse
@@ -28,10 +28,7 @@ if __name__ == '__main__':
     logging.basicConfig(filename=f'./logs/balanced_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
-    if conf.LM in ["vinai/bertweet-base", "roberta-base"]:
-        model = RobertaForSequenceClassification.from_pretrained(conf.LM, num_labels=conf.CLASSNUM).to(device)
-    elif conf.LM == "bert-base-cased":
-        model = BertForSequenceClassification.from_pretrained(conf.LM, num_labels=conf.CLASSNUM).to(device)
+    model = MyModel(tokenizer.vocab_size, conf).to(device)
 
     dataset = MyDataset(tokenizer, conf)
 
@@ -42,14 +39,14 @@ if __name__ == '__main__':
         pin_memory=True,
         shuffle=True
     )
-
+    loss_fn = CrossEntropyLoss()
     optimizer = SGD(model.parameters(), lr=conf.LMLR)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=0.1 * conf.EPOCHS * len(train_loader),
         num_training_steps=conf.EPOCHS * len(train_loader)
     )
-    # print(model.state_dict())
+    print(model.state_dict())
     model.train()
     logging.info("training start")
     best_loss = 1e5
@@ -62,12 +59,13 @@ if __name__ == '__main__':
                 inputs[k] = inputs[k].to(device).squeeze()
             labels = labels.to(device)
             # print(inputs["input_ids"].shape)
-            outputs = model(**inputs, labels=labels)
+            outputs = model(inputs)
+            loss = loss_fn(outputs, labels)
             optimizer.zero_grad()
-            outputs.loss.backward()
+            loss.backward()
             optimizer.step()
             scheduler.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
-            train_loss = outputs.loss.item()
+            train_loss = loss.item()
             if idx % 50 == 0:
                 print(f"train_loss: {train_loss:.3f}")
         if train_loss < best_loss:

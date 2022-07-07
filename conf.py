@@ -4,11 +4,12 @@ DATAPATH = "./dataset/balanced.csv"
 BATCHSIZE = 32
 EPOCHS = 40
 LMLR = 3e-6
-LINEARLR = 3e-6
+LINEARLR = 1e-3
 MAXLENGTH = 50
-LM = "roberta-base"
+# LM = "bert-base-cased"
+LM = "vinai/bertweet-base"
 # MODLENAME = "best_loss_bert_7class"
-MODLENAME = "40epochs_finished_roberta_7class"
+MODLENAME = "40epochs_finished_bertweet_7class"
 CLASSNUM = 7  # 2
 
 MULTI_CLASS_WEIGHT = [1., 0.0585, 0.0447, 0.0137, 0.0321, 0.0204, 0.0222]

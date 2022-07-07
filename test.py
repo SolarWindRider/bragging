@@ -26,7 +26,7 @@ if __name__ == '__main__':
     device = "cuda:2"
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     model = MyModel(tokenizer.vocab_size, conf)
-    model.load_state_dict(torch.load(f"./models/{conf.MODLENAME}.pt", map_location=device))
+    model.load_state_dict(torch.load(f"./models/weighted/{conf.MODLENAME}.pt", map_location=device))
     model.to(device)
 
     dataset = MyDataset(tokenizer, conf, istrain=False)
@@ -48,6 +48,8 @@ if __name__ == '__main__':
             outputs = model(inputs)
             outputs = outputs.argmax(dim=1)
             pred += list(outputs.cpu().numpy())
-    average = "macro"
-    print(
-        f"P: {precision_score(truth, pred, average=average):6.3f}%, R: {recall_score(truth, pred, average=average):6.3f}%, F1: {f1_score(truth, pred, average=average):6.3f}%")
+    for average in ["micro", "macro"]:
+        print(conf.MODLENAME)
+        print(average)
+        print(
+            f"P: {precision_score(truth, pred, average=average):6.3%}, R: {recall_score(truth, pred, average=average):6.3%}, F1: {f1_score(truth, pred, average=average):6.3%}")

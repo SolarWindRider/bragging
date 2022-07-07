@@ -1,6 +1,5 @@
 from utils import MyDataset
-from transformers import AutoTokenizer, BertForSequenceClassification, RobertaForSequenceClassification, \
-    get_linear_schedule_with_warmup
+from transformers import AutoTokenizer, BertForSequenceClassification, RobertaForSequenceClassification
 from torch.utils.data import DataLoader
 from torch.optim import SGD
 import conf
@@ -44,12 +43,7 @@ if __name__ == '__main__':
     )
 
     optimizer = SGD(model.parameters(), lr=conf.LMLR)
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=0.1 * conf.EPOCHS * len(train_loader),
-        num_training_steps=conf.EPOCHS * len(train_loader)
-    )
-    # print(model.state_dict())
+    print(model.state_dict())
     model.train()
     logging.info("training start")
     best_loss = 1e5
@@ -66,7 +60,6 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             outputs.loss.backward()
             optimizer.step()
-            scheduler.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
             train_loss = outputs.loss.item()
             if idx % 50 == 0:
                 print(f"train_loss: {train_loss:.3f}")

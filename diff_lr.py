@@ -18,14 +18,15 @@ if __name__ == '__main__':
     parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int)
     parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
     args = parser.parse_args()
-
+    #
+    # device = "cpu"
     device = args.device
     filepath = args.filepath
     conf.CLASSNUM = args.classnum
     conf.LM = args.languagemodel
     conf.MODLENAME = args.model_name
 
-    logging.basicConfig(filename=f'./logs/balanced_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
+    logging.basicConfig(filename=f'./logs/difflr_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     if conf.LM in ["vinai/bertweet-base", "roberta-base"]:
@@ -43,13 +44,22 @@ if __name__ == '__main__':
         shuffle=True
     )
 
-    optimizer = SGD(model.parameters(), lr=conf.LMLR)
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
+    if conf.LM in ["vinai/bertweet-base", "roberta-base"]:
+        optimizer1 = SGD(model.roberta.parameters(), lr=conf.LMLR)
+    elif conf.LM == "bert-base-cased":
+        optimizer1 = SGD(model.bert.parameters(), lr=conf.LMLR)
+    scheduler1 = get_linear_schedule_with_warmup(
+        optimizer1,
         num_warmup_steps=0.1 * conf.EPOCHS * len(train_loader),
         num_training_steps=conf.EPOCHS * len(train_loader)
     )
-    # print(model.state_dict())
+    optimizer2 = SGD(model.classifier.parameters(), lr=conf.LINEARLR)
+    scheduler2 = get_linear_schedule_with_warmup(
+        optimizer2,
+        num_warmup_steps=0.1 * conf.EPOCHS * len(train_loader),
+        num_training_steps=conf.EPOCHS * len(train_loader)
+    )
+
     model.train()
     logging.info("training start")
     best_loss = 1e5
@@ -63,10 +73,13 @@ if __name__ == '__main__':
             labels = labels.to(device)
             # print(inputs["input_ids"].shape)
             outputs = model(**inputs, labels=labels)
-            optimizer.zero_grad()
+            optimizer1.zero_grad()
+            optimizer2.zero_grad()
             outputs.loss.backward()
-            optimizer.step()
-            scheduler.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
+            optimizer1.step()
+            optimizer2.step()
+            scheduler1.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
+            scheduler2.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
             train_loss = outputs.loss.item()
             if idx % 50 == 0:
                 print(f"train_loss: {train_loss:.3f}")
