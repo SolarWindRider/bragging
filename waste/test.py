@@ -23,7 +23,7 @@ if __name__ == '__main__':
     # tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     # model = MyModel(tokenizer.vocab_size, conf).load_state_dict(torch.load(f"./models/{conf.MODLENAME}"))
 
-    device = "cuda:2"
+    device = "cuda:0"
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     model = MyModel(tokenizer.vocab_size, conf)
     model.load_state_dict(torch.load(f"./models/weighted/{conf.MODLENAME}.pt", map_location=device))

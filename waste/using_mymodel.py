@@ -1,7 +1,7 @@
 from utils import MyDataset, MyModel
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 from torch.utils.data import DataLoader
-from torch.optim import SGD
+from transformers import AdamW
 from torch.nn import CrossEntropyLoss
 import conf
 from tqdm import tqdm
@@ -39,14 +39,25 @@ if __name__ == '__main__':
         pin_memory=True,
         shuffle=True
     )
-    loss_fn = CrossEntropyLoss()
-    optimizer = SGD(model.parameters(), lr=conf.LMLR)
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=0.1 * conf.EPOCHS * len(train_loader),
-        num_training_steps=conf.EPOCHS * len(train_loader)
-    )
-    print(model.state_dict())
+
+    param_optimizer = list(model.named_parameters())
+    no_decay = ['bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+         'weight_decay': 0.01},
+        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+         'weight_decay': 0.0}
+    ]
+
+    optimizer = AdamW(optimizer_grouped_parameters, lr=3e-6)
+
+    loss_fn = CrossEntropyLoss(ignore_index=-100, reduction='mean')
+
+    # scheduler = get_linear_schedule_with_warmup(
+    #     optimizer,
+    #     num_warmup_steps=0.1 * conf.EPOCHS * len(train_loader),
+    #     num_training_steps=conf.EPOCHS * len(train_loader)
+    # )
     model.train()
     logging.info("training start")
     best_loss = 1e5
@@ -58,15 +69,14 @@ if __name__ == '__main__':
             for k in inputs.keys():
                 inputs[k] = inputs[k].to(device).squeeze()
             labels = labels.to(device)
-            # print(inputs["input_ids"].shape)
             outputs = model(inputs)
             loss = loss_fn(outputs, labels)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            scheduler.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
+            # scheduler.step()  # torch的scheduler放在epoch循环，transformers的要放在里面的循环
             train_loss = loss.item()
-            if idx % 50 == 0:
+            if idx % 20 == 0:
                 print(f"train_loss: {train_loss:.3f}")
         if train_loss < best_loss:
             best_loss = train_loss
