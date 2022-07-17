@@ -1,9 +1,9 @@
 import pickle
 
-from utils import MyDataset, SimpleBertModel
+from utils import MyDataset, MyModel
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
-from torch.optim import AdamW
+from transformers import AdamW
 from torch.nn import CrossEntropyLoss
 import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
@@ -21,23 +21,20 @@ if __name__ == '__main__':
     parser.add_argument("-n", "--model_name", help="model name to save", type=str)
     parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int)
     parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
-    parser.add_argument("-lf", "--linguestic_feature", help="filepath to save trained model", type=str, default=None)
     args = parser.parse_args()
 
-    # device = "cuda:1"
-    # filepath = "./models/weighted/"
+    # device = "cpu"
     device = args.device
     filepath = args.filepath
     conf.CLASSNUM = args.classnum
     conf.LM = args.languagemodel
     conf.MODLENAME = args.model_name
     conf.DATAPATH = "./dataset/bragging_data.csv"
-    conf.LingFeature = args.linguestic_feature
 
-    logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
+    logging.basicConfig(filename=f'./logs/weighted_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
-    model = SimpleBertModel(tokenizer.vocab_size, conf).to(device)
+    model = MyModel(tokenizer.vocab_size, conf).to(device)
 
     train_set = MyDataset(tokenizer, conf, "train")
     train_loader = DataLoader(
@@ -68,14 +65,14 @@ if __name__ == '__main__':
     loss_fn = CrossEntropyLoss(ignore_index=-100, reduction='mean')
 
     logging.info("training start")
-    loss_train_li = []
-    best_loss_train = 1e5
+    loss_train_li, loss_dev_li = [], []
+    best_loss_train, best_loss_dev = 1e5, 1e5
     for ep in range(conf.EPOCHS):
         model.train()
         logging.info(f"EPOCH: {ep}")
-        loss_train = 0.
-        # for idx, (inputs, labels) in enumerate(train_loader):
-        for inputs, labels in tqdm(train_loader):
+        loss_train, loss_dev = 0., 0.
+        for idx, (inputs, labels) in enumerate(train_loader):
+            # for inputs, labels in tqdm(train_loader):
             for k in inputs.keys():
                 inputs[k] = inputs[k].to(device).squeeze()
             labels = labels.to(device)
@@ -85,17 +82,37 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss_train_.backward()
             optimizer.step()
+            # if idx % 20 == 0:
+            #     print(f"loss_train: {loss_train:.3f}")
         model.eval()
+        with torch.no_grad():
+            for idx, (inputs, labels) in enumerate(dev_loader):
+                for k in inputs.keys():
+                    inputs[k] = inputs[k].to(device).squeeze()
+                labels = labels.to(device)
+                outputs = model(inputs)
+                loss_dev_ = loss_fn(outputs, labels)
+                loss_dev = loss_dev_.item()
 
         if loss_train < best_loss_train:
             best_loss_train = loss_train
             torch.save(model.state_dict(),
                        f"{filepath}/best_loss_train_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
             logging.info(f"best_loss_train model saved, loss: {best_loss_train}")
-
+        if loss_dev < best_loss_dev:
+            best_loss_dev = loss_dev
+            torch.save(model.state_dict(),
+                       f"{filepath}/best_loss_dev_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
+            logging.info(f"best_loss_dev_model saved, loss: {best_loss_dev}")
+        if ep == 39:  # 复现原文的40个epoch
+            torch.save(model.state_dict(),
+                       f"{filepath}/{ep + 1}epochs_finished_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
+            logging.info(f"{ep + 1}epochs training finished. model saved")
         loss_train_li.append(loss_train)
+        loss_dev_li.append(loss_dev)
     torch.save(model.state_dict(),
                f"{filepath}/{conf.EPOCHS}epochs_finished_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
     logging.info(f"{conf.EPOCHS}epochs training finished. model saved")
 
-    pickle.dump(loss_train_li, open(f"{conf.MODLENAME}_loss_train.pt", "wb"))
+    pickle.dump(loss_train_li, open("loss_train.pt", "wb"))
+    pickle.dump(loss_dev_li, open("loss_dev.pt", "wb"))

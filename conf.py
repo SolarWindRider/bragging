@@ -1,16 +1,18 @@
-DATAPATH = "./dataset/balanced.csv"
-# DATAPATH = "./dataset/bragging_data.csv"
+# DATAPATH = "./dataset/balanced.csv"
+DATAPATH = "./dataset/bragging_data.csv"
 # DEVICE = "cpu" # DDP不需要这个
+LingFeature = "NRC"  # bragging原文使用的语言特征, "NRC", "LIWC", "Clusters", 默认值为None
 BATCHSIZE = 32
-EPOCHS = 60
+EPOCHS = 100
 LMLR = 3e-6
 LINEARLR = 1e-3
 DROPOUT = 0.2
 MAXLENGTH = 50
+Beta = 0.001
 # LM = "bert-base-cased"
 LM = "vinai/bertweet-base"
-# MODLENAME = "best_loss_bertweet_7class"
-MODLENAME = "60epochs_finished_bertweet_7class"
+MODLENAME = "best_loss_train_bertweet_7class"
+# MODLENAME = "40epochs_finished_bertweet_7class"
 CLASSNUM = 7  # 2
 MULTI_CLASS_MAP = {
     "not": 0,  # 2838
