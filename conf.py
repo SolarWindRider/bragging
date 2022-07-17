@@ -11,8 +11,8 @@ MAXLENGTH = 50
 Beta = 0.001
 # LM = "bert-base-cased"
 LM = "vinai/bertweet-base"
-MODLENAME = "best_loss_train_bertweet_7class"
-# MODLENAME = "40epochs_finished_bertweet_7class"
+# MODLENAME = "best_loss_train_bertweet-nrc_7class"
+MODLENAME = "100epochs_finished_bertweet-nrc_7class"
 CLASSNUM = 7  # 2
 MULTI_CLASS_MAP = {
     "not": 0,  # 2838

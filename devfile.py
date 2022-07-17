@@ -1,12 +1,3 @@
-from nrclex import NRCLex
+from utils import get_loss_fig
 
-# import pandas as pd
-# import conf
-
-# datadf = pd.read_csv(conf.DATAPATH)
-
-aa = NRCLex('I hate everything about you')
-bb = NRCLex("I love you so much")
-# aa.affect_frequencies
-print(NRCLex('I hate everything about you').affect_frequencies)
-print("pass")
+get_loss_fig("bertweet-nrc_loss_train.pt")

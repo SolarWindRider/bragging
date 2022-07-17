@@ -166,6 +166,5 @@ def get_loss_fig(loss_train_path="loss_train.pt"):
     df = pd.DataFrame(dic)
     sns.set_theme(style="darkgrid")
     sns.lineplot(x='epoch', y='loss_train', data=df, lw=3)
-    sns.lineplot(x='epoch', y='loss_dev', data=df, lw=3)
     plt.legend(labels=['loss_train'], facecolor='white')
     plt.show()

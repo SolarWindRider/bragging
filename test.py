@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils import MyDataset, MyModel
+from utils import MyDataset, SimpleBertModel
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -25,8 +25,8 @@ if __name__ == '__main__':
 
     device = "cuda:0"
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
-    model = MyModel(tokenizer.vocab_size, conf)
-    model.load_state_dict(torch.load(f"./models/weighted/{conf.MODLENAME}.pt", map_location=device))
+    model = SimpleBertModel(tokenizer.vocab_size, conf)
+    model.load_state_dict(torch.load(f"./models/nrc/{conf.MODLENAME}.pt", map_location=device))
     model.to(device)
 
     dataset = MyDataset(tokenizer, conf, "test")
