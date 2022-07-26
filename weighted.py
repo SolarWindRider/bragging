@@ -1,11 +1,10 @@
 import pickle
 
-from utils import MyDataset, SimpleBertModel
+from utils import MyDataset, SimpleBertModel, seed_all
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.nn import CrossEntropyLoss
-import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
 import conf
 from tqdm import tqdm
@@ -22,6 +21,7 @@ if __name__ == '__main__':
     parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int)
     parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
     parser.add_argument("-lf", "--linguestic_feature", help="filepath to save trained model", type=str, default=None)
+    parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
     args = parser.parse_args()
 
     # device = "cuda:1"
@@ -33,13 +33,15 @@ if __name__ == '__main__':
     conf.MODLENAME = args.model_name
     conf.DATAPATH = "./dataset/bragging_data.csv"
     conf.LingFeature = args.linguestic_feature
+    conf.RANDSEED = args.random_seed
 
+    seed_all(conf.RANDSEED)
     logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     model = SimpleBertModel(tokenizer.vocab_size, conf).to(device)
 
-    train_set = MyDataset(tokenizer, conf, "train")
+    train_set = MyDataset(tokenizer, conf, True)
     train_loader = DataLoader(
         train_set,
         batch_size=conf.BATCHSIZE,

@@ -29,7 +29,7 @@ if __name__ == '__main__':
     model.load_state_dict(torch.load(f"./models/nrc/{conf.MODLENAME}.pt", map_location=device))
     model.to(device)
 
-    dataset = MyDataset(tokenizer, conf, "test")
+    dataset = MyDataset(tokenizer, conf, False)
     train_loader = DataLoader(
         dataset,
         batch_size=64,
