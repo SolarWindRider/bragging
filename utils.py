@@ -1,7 +1,7 @@
 from nrclex import NRCLex
 from torch.utils.data import Dataset, DataLoader
-from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, Tanh, KLDivLoss, CrossEntropyLoss, \
-    MSELoss
+from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, Tanh, KLDivLoss, CrossEntropyLoss
+from torch.nn import functional as F
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 import pandas as pd
@@ -224,8 +224,8 @@ class GanData(Dataset):
 
     def __len__(self):
         length = None
-        if self.istrain is True:
-            length = ceil(2838 / self.conf.BATCHSIZE) * self.conf.BATCHSIZE  # 训练集label为not类别的样本数量,并针对batchsize进行圆整
+        if self.istrain is True: # 训练集label为not类别的样本数量,并针对batchsize进行圆整
+            length = ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE) * self.conf.BATCHSIZE
         elif self.istrain is False:
             length = len(self.data)
         return length
@@ -262,7 +262,7 @@ class GanTrainDataLoader(Iterator):
         return output
 
     def __len__(self):
-        return ceil(2838 / conf.BATCHSIZE)
+        return ceil(2838 * conf.EPOCHS / conf.BATCHSIZE)
 
 
 class BertClsLayer(Module):
@@ -294,8 +294,8 @@ class Generator(Module):
                                 Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
         self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
         # 损失函数定义在模型类的内部
-        self.KLloss_c = KLDivLoss(reduction="batchmean")
-        self.KLloss_t = KLDivLoss(reduction="batchmean")
+        self.KLloss_c = KLDivLoss(reduction="batchmean", log_target=True)
+        self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
         self.CEloss_clf = CrossEntropyLoss()
 
     def forward(self, inputs, istrain=True):
@@ -350,8 +350,8 @@ class Generator(Module):
 
             klloss_c, klloss_t, celoss_clf = 0., 0., 0.
             for i in range(self.conf.CLASSNUM):
-                klloss_c += self.KLloss_c(disentangled_features[i]["h_c"], disentangle_combined_features["h_hat_c"][i])
-                klloss_t += self.KLloss_t(disentangled_features[i]["h_t"], disentangle_combined_features["h_hat_t"][i])
+                klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[i]["h_c"]), F.log_softmax(disentangle_combined_features["h_hat_c"][i], dim=1))
+                klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[i]["h_t"]), F.log_softmax(disentangle_combined_features["h_hat_t"][i], dim=1))
                 celoss_clf += self.CEloss_clf(self.clf(combined_features[i]["h_rep"][0]),  # h_rep是解耦后重新还原的向量，每个类别只有一个
                                               torch.tensor([i for _ in range(self.conf.BATCHSIZE)], dtype=torch.long,
                                                            device=self.conf.DEVICE))

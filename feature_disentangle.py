@@ -60,8 +60,8 @@ if __name__ == '__main__':
     for ep in range(conf.EPOCHS):
         logging.info(f"EPOCH: {ep}")
         extra_d_step = 0
-        for idx, inputs in enumerate(train_loader):
-            # for inputs in tqdm(train_loader):
+        # for idx, inputs in enumerate(train_loader):
+        for inputs in tqdm(train_loader):
             total_step += 1
             # ================================================================== #
             #                      Train the discriminator                       #
