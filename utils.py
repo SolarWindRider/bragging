@@ -224,7 +224,7 @@ class GanData(Dataset):
 
     def __len__(self):
         length = None
-        if self.istrain is True: # 训练集label为not类别的样本数量,并针对batchsize进行圆整
+        if self.istrain is True:  # 训练集label为not类别的样本数量,并针对batchsize进行圆整
             length = ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE) * self.conf.BATCHSIZE
         elif self.istrain is False:
             length = len(self.data)
@@ -238,13 +238,12 @@ class GanData(Dataset):
             inputs = inputs.to(self.conf.DEVICE)
             return inputs
         elif self.istrain is False:
-            label = self.conf.MULTI_CLASS_MAP[self.data[item % len(self.data)][1]]
+            label = torch.tensor(self.conf.MULTI_CLASS_MAP[self.data[item % len(self.data)][1]])
             inputs = self.tokenizer(self.data[item % len(self.data)][0], return_tensors="pt",
                                     max_length=self.conf.MAXLENGTH, padding="max_length",
                                     truncation=True)
             inputs = inputs.to(self.conf.DEVICE)
-            label = label.to(self.conf.DEVICE)
-            return inputs, label
+            return inputs, label # 注意，label不放在GPU里面
 
 
 class GanTrainDataLoader(Iterator):
@@ -298,76 +297,88 @@ class Generator(Module):
         self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
         self.CEloss_clf = CrossEntropyLoss()
 
-    def forward(self, inputs, istrain=True):
+    def forward(self, inputs, mode="Train"):
         """
         :param input: [{input_ids:[], ..., mask...}, {} ...]
-        :param istrain: bool 默认True
+        :param mode: train 返回三个loss， gen 返回生成的向量， test 返回分类器结果
         """
-        disentangled_features = []  # [{"h_c": h_c, "h_t": h_t}, {}, ...]
-        for each in inputs:
-            # feature disentangle, get h_c, h_t
-            cls = self.bert_cls_layer(each)
+
+        if mode is "test":
+            cls = self.bert_cls_layer(inputs)
             h_c = self.mlp_c(cls)
             h_t = self.mlp_t(cls)
-            disentangled_features.append({"h_c": h_c, "h_t": h_t})
-        assert len(disentangled_features) == self.conf.CLASSNUM
+            pred = self.clf(torch.add(h_c, h_t))
+            return pred
 
-        # 特征重组
-        # 每一个类别的h_t都要和其它类别的h_c重组一次
-        # 元素在列表中的位置就是它的label
-        combined_features = [{"h_rep": [], "h_hat": []} for i in range(self.conf.CLASSNUM)]
-        for i in range(self.conf.CLASSNUM):
-            for j in range(self.conf.CLASSNUM):
-                conbined_feature = torch.add(disentangled_features[i]["h_t"], disentangled_features[j]["h_c"])
-                if i == j:  # 相同类别的特征组合
-                    combined_features[i]["h_rep"].append(conbined_feature)
-                else:  # 不同类别的特征组合
-                    combined_features[i]["h_hat"].append(conbined_feature)
-        assert len(combined_features) == self.conf.CLASSNUM
+        else:
+            disentangled_features = []  # [{"h_c": h_c, "h_t": h_t}, {}, ...]
+            for each in inputs:
+                # feature disentangle, get h_c, h_t
+                cls = self.bert_cls_layer(each)
+                h_c = self.mlp_c(cls)
+                h_t = self.mlp_t(cls)
+                disentangled_features.append({"h_c": h_c, "h_t": h_t})
+            assert len(disentangled_features) == self.conf.CLASSNUM
+            # 特征重组
+            # 每一个类别的h_t都要和其它类别的h_c重组一次
+            # 元素在列表中的位置就是它的label
+            combined_features = [{"h_rep": [], "h_hat": []} for i in range(self.conf.CLASSNUM)]
+            for i in range(self.conf.CLASSNUM):
+                for j in range(self.conf.CLASSNUM):
+                    conbined_feature = torch.add(disentangled_features[i]["h_t"], disentangled_features[j]["h_c"])
+                    if i == j:  # 相同类别的特征组合
+                        combined_features[i]["h_rep"].append(conbined_feature)
+                    else:  # 不同类别的特征组合
+                        combined_features[i]["h_hat"].append(conbined_feature)
+            assert len(combined_features) == self.conf.CLASSNUM
 
-        if istrain is True:
-            # 再次对重组的特征进行解耦
-            # disentangle_combined_features {"h_hat_c": [h_hat_c], "h_hat_t": [h_hat_t]}
-            h_hat_c = [torch.zeros((self.conf.BATCHSIZE, self.conf.FeatureDim),
-                                   dtype=torch.float32, device=self.conf.DEVICE)
-                       for _ in range(self.conf.CLASSNUM)]
-            h_hat_t = [torch.zeros((self.conf.BATCHSIZE, self.conf.FeatureDim),
-                                   dtype=torch.float32, device=self.conf.DEVICE)
-                       for _ in range(self.conf.CLASSNUM)]
-            for i in range(self.conf.CLASSNUM):
-                for j in range(self.conf.CLASSNUM - 1):
-                    h_hat_t[i] = torch.add(h_hat_t[i], self.mlp_t(combined_features[i]["h_hat"][j]))
-                    if j < i:
-                        h_hat_c[j] = torch.add(h_hat_c[j], self.mlp_c(combined_features[i]["h_hat"][j]))
-                    else:
-                        h_hat_c[j + 1] = torch.add(h_hat_c[j + 1], self.mlp_c(combined_features[i]["h_hat"][j]))
-            for i in range(self.conf.CLASSNUM):
-                h_hat_t[i] = torch.div(h_hat_t[i], (self.conf.CLASSNUM - 1))
-                h_hat_c[i] = torch.div(h_hat_c[i], (self.conf.CLASSNUM - 1))
-            assert len(h_hat_t) == self.conf.CLASSNUM
-            assert len(h_hat_c) == self.conf.CLASSNUM
-            disentangle_combined_features = {"h_hat_c": h_hat_c, "h_hat_t": h_hat_t}
+            if mode is "train":
+                # 再次对重组的特征进行解耦
+                # disentangle_combined_features {"h_hat_c": [h_hat_c], "h_hat_t": [h_hat_t]}
+                h_hat_c = [torch.zeros((self.conf.BATCHSIZE, self.conf.FeatureDim),
+                                       dtype=torch.float32, device=self.conf.DEVICE)
+                           for _ in range(self.conf.CLASSNUM)]
+                h_hat_t = [torch.zeros((self.conf.BATCHSIZE, self.conf.FeatureDim),
+                                       dtype=torch.float32, device=self.conf.DEVICE)
+                           for _ in range(self.conf.CLASSNUM)]
+                for i in range(self.conf.CLASSNUM):
+                    for j in range(self.conf.CLASSNUM - 1):
+                        h_hat_t[i] = torch.add(h_hat_t[i], self.mlp_t(combined_features[i]["h_hat"][j]))
+                        if j < i:
+                            h_hat_c[j] = torch.add(h_hat_c[j], self.mlp_c(combined_features[i]["h_hat"][j]))
+                        else:
+                            h_hat_c[j + 1] = torch.add(h_hat_c[j + 1], self.mlp_c(combined_features[i]["h_hat"][j]))
+                for i in range(self.conf.CLASSNUM):
+                    h_hat_t[i] = torch.div(h_hat_t[i], (self.conf.CLASSNUM - 1))
+                    h_hat_c[i] = torch.div(h_hat_c[i], (self.conf.CLASSNUM - 1))
+                assert len(h_hat_t) == self.conf.CLASSNUM
+                assert len(h_hat_c) == self.conf.CLASSNUM
+                disentangle_combined_features = {"h_hat_c": h_hat_c, "h_hat_t": h_hat_t}
 
-            klloss_c, klloss_t, celoss_clf = 0., 0., 0.
-            for i in range(self.conf.CLASSNUM):
-                klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[i]["h_c"]), F.log_softmax(disentangle_combined_features["h_hat_c"][i], dim=1))
-                klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[i]["h_t"]), F.log_softmax(disentangle_combined_features["h_hat_t"][i], dim=1))
-                celoss_clf += self.CEloss_clf(self.clf(combined_features[i]["h_rep"][0]),  # h_rep是解耦后重新还原的向量，每个类别只有一个
-                                              torch.tensor([i for _ in range(self.conf.BATCHSIZE)], dtype=torch.long,
-                                                           device=self.conf.DEVICE))
-                for h_hat in combined_features[i]["h_hat"]:
-                    celoss_clf += self.CEloss_clf(self.clf(h_hat),
+                klloss_c, klloss_t, celoss_clf = 0., 0., 0.
+                for i in range(self.conf.CLASSNUM):
+                    klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[i]["h_c"]),
+                                              F.log_softmax(disentangle_combined_features["h_hat_c"][i], dim=1))
+                    klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[i]["h_t"]),
+                                              F.log_softmax(disentangle_combined_features["h_hat_t"][i], dim=1))
+                    celoss_clf += self.CEloss_clf(self.clf(combined_features[i]["h_rep"][0]),
+                                                  # h_rep是解耦后重新还原的向量，每个类别只有一个
                                                   torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
                                                                dtype=torch.long,
                                                                device=self.conf.DEVICE))
-                klloss_c /= self.conf.CLASSNUM
-                klloss_t /= self.conf.CLASSNUM
-                celoss_clf /= self.conf.CLASSNUM ** 2
+                    for h_hat in combined_features[i]["h_hat"]:
+                        celoss_clf += self.CEloss_clf(self.clf(h_hat),
+                                                      torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
+                                                                   dtype=torch.long,
+                                                                   device=self.conf.DEVICE))
+                    klloss_c /= self.conf.CLASSNUM
+                    klloss_t /= self.conf.CLASSNUM
+                    celoss_clf /= self.conf.CLASSNUM ** 2
 
-            return klloss_c, klloss_t, celoss_clf
+                return klloss_c, klloss_t, celoss_clf
 
-        elif istrain is False:
-            return combined_features
+            elif mode is "gen":
+                return combined_features
 
 
 class Discrimitor(Module):
