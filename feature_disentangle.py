@@ -1,8 +1,8 @@
-import pickle
 from utils import GanTrainDataLoader, Generator, Discrimitor, seed_all
 from transformers import AutoTokenizer
 from torch.optim import AdamW
 from torch.utils.tensorboard import SummaryWriter
+from torchviz import make_dot
 import conf
 from tqdm import tqdm
 import argparse
@@ -54,24 +54,28 @@ if __name__ == '__main__':
     d_optimizer = AdamW(discriminitor.parameters(), lr=3e-6)
     g_optimizer = AdamW(genertator.parameters(), lr=3e-6)
 
+
+    def reset_grad():
+        d_optimizer.zero_grad()
+        g_optimizer.zero_grad()
+
+
     logging.info("training start")
     total_step = 0  # train discriminitor for 50 extra_step
     best_loss_D, loss_D, best_loss_G, loss_G = 10000., 10000., 10000., 10000.
     for ep in range(conf.EPOCHS):
         logging.info(f"EPOCH: {ep}")
         extra_d_step = 0
-        # for idx, inputs in enumerate(train_loader):
-        for inputs in tqdm(train_loader):
+        for idx, inputs in enumerate(train_loader):
+            # for inputs in tqdm(train_loader):
             total_step += 1
             # ================================================================== #
             #                      Train the discriminator                       #
             # ================================================================== #
-            genertator.eval()
-            with torch.no_grad():
-                conbined_features = genertator(inputs, istrain=False)
+            conbined_features = genertator(inputs, mode="gen")
             discriminitor.train()
             loss_D = discriminitor(conbined_features)
-            d_optimizer.zero_grad()
+            reset_grad()
             loss_D.backward()
             d_optimizer.step()
             extra_d_step += 1
@@ -81,10 +85,9 @@ if __name__ == '__main__':
             # ================================================================== #
             #                        Train the generator                         #
             # ================================================================== #
-            genertator.train()
-            klloss_c, klloss_t, celoss_clf = genertator(inputs)
+            klloss_c, klloss_t, celoss_clf = genertator(inputs, "train")
             loss_G = conf.a * klloss_c + conf.b * klloss_t + conf.c * celoss_clf
-            g_optimizer.zero_grad()
+            reset_grad()
             loss_G.backward()
             g_optimizer.step()
             writer.add_scalar("klloss_c", klloss_c.item(), total_step)

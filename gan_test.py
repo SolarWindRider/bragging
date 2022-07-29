@@ -20,7 +20,7 @@ if __name__ == '__main__':
     # parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
     # args = parser.parse_args()
 
-    device = "cuda:1"
+    device = conf.DEVICE
     filepath = "./models/gan/"
 
     # filepath = args.filepath
@@ -35,6 +35,9 @@ if __name__ == '__main__':
     seed_all(conf.RANDSEED)
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     genertator = Generator(len(tokenizer), conf).to(device)
+    # genertator.load_state_dict(torch.load(f"./models/gan/g_clfonly_40epochs.pt", map_location=device))
+    genertator.load_state_dict(torch.load(f"./models/gan/g_clfonly_40epochs_0.6.pt", map_location=device))
+
     test_set = GanData(tokenizer, conf, istrain=False)
     test_loader = DataLoader(test_set, batch_size=64)
 

@@ -85,8 +85,13 @@ class SimpleBertModel(Module):
         self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
         if self.conf.LM == "vinai/bertweet-base":
             vocab_size += 1
-        self.linear = Linear(vocab_size, self.conf.CLASSNUM)
+        self.linear = Linear(vocab_size, self.conf.FeatureDim)
         self.dropout = Dropout(self.conf.DROPOUT)
+        self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
+                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
+        self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
+                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
+        self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
 
     def forward(self, inputs):
         if self.conf.LingFeature is not None:
@@ -104,12 +109,48 @@ class SimpleBertModel(Module):
         if self.conf.LMoutput:
             return cls
 
-        outputs = self.dropout(cls)
-        outputs = torch.tanh(outputs)
-        outputs = self.dropout(outputs)
-        linear_output = self.linear(outputs)
-        return linear_output
+        cls = self.linear(cls)  # shape (batch, FeatureDim)
+        cls = self.dropout(cls)
+        h_c = self.mlp_c(cls)
+        h_t = self.mlp_t(cls)
+        out = torch.add(h_c, h_t)
+        return out
 
+
+# class SimpleBertModel(Module):
+#     def __init__(self, vocab_size, conf):
+#         super().__init__()
+#         self.conf = conf
+#         if self.conf.LingFeature is not None:
+#             self.embedding_lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM, output_hidden_states=True)
+#             self.attn_gate = AttnGating(self.conf)
+#         self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
+#         if self.conf.LM == "vinai/bertweet-base":
+#             vocab_size += 1
+#         self.linear = Linear(vocab_size, self.conf.CLASSNUM)
+#         self.dropout = Dropout(self.conf.DROPOUT)
+#
+#     def forward(self, inputs):
+#         if self.conf.LingFeature is not None:
+#             _ = self.embedding_lm(input_ids=inputs["input_ids"],
+#                                   token_type_ids=inputs["token_type_ids"],
+#                                   attention_mask=inputs["attention_mask"])
+#             roberta_embed = _[1][0]
+#             combine_embed = self.attn_gate(roberta_embed, inputs["input_feature"])
+#             lm_output = self.lm(input_ids=None, token_type_ids=inputs["token_type_ids"],
+#                                 attention_mask=inputs["attention_mask"], inputs_embeds=combine_embed)
+#         else:
+#             lm_output = self.lm(input_ids=inputs["input_ids"], token_type_ids=inputs["token_type_ids"],
+#                                 attention_mask=inputs["attention_mask"])
+#         cls = lm_output.logits[:, 0, :]
+#         if self.conf.LMoutput:
+#             return cls
+#
+#         outputs = self.dropout(cls)
+#         outputs = torch.tanh(outputs)
+#         outputs = self.dropout(outputs)
+#         linear_output = self.linear(outputs)
+#         return linear_output
 
 class AttnGating(Module):
     def __init__(self, conf):
@@ -225,8 +266,8 @@ class GanData(Dataset):
     def __len__(self):
         length = None
         if self.istrain is True:  # 训练集label为not类别的样本数量,并针对batchsize进行圆整
-            length = ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE) * self.conf.BATCHSIZE
-        elif self.istrain is False:
+            length = ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE * self.conf.Nsampling) * self.conf.BATCHSIZE
+        elif self.istrain is False:  # 乘以0.8是为了负采样
             length = len(self.data)
         return length
 
@@ -243,7 +284,7 @@ class GanData(Dataset):
                                     max_length=self.conf.MAXLENGTH, padding="max_length",
                                     truncation=True)
             inputs = inputs.to(self.conf.DEVICE)
-            return inputs, label # 注意，label不放在GPU里面
+            return inputs, label  # 注意，label不放在GPU里面
 
 
 class GanTrainDataLoader(Iterator):
@@ -371,14 +412,24 @@ class Generator(Module):
                                                       torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
                                                                    dtype=torch.long,
                                                                    device=self.conf.DEVICE))
-                    klloss_c /= self.conf.CLASSNUM
-                    klloss_t /= self.conf.CLASSNUM
-                    celoss_clf /= self.conf.CLASSNUM ** 2
+                klloss_c /= self.conf.CLASSNUM
+                klloss_t /= self.conf.CLASSNUM
+                celoss_clf /= self.conf.CLASSNUM ** 2
 
                 return klloss_c, klloss_t, celoss_clf
 
             elif mode is "gen":
                 return combined_features
+
+            elif mode is "clf_only":  # 不进行gan训练，只训练生成器中的clf看看clf和采样方法的效果，仅用于开发过程
+                celoss_clf = 0.
+                for i in range(self.conf.CLASSNUM):
+                    celoss_clf += self.CEloss_clf(self.clf(combined_features[i]["h_rep"][0]),
+                                                  torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
+                                                               dtype=torch.long,
+                                                               device=self.conf.DEVICE))
+                celoss_clf /= self.conf.CLASSNUM
+                return celoss_clf
 
 
 class Discrimitor(Module):
