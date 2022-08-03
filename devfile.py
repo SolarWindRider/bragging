@@ -80,9 +80,9 @@ class SimpleBertModel(Module):
         super().__init__()
         self.conf = conf
         if self.conf.LingFeature is not None:
-            self.embedding_lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM, output_hidden_states=True)
+            self.embedding_lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}", output_hidden_states=True)
             self.attn_gate = AttnGating(self.conf)
-        self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
+        self.lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}")
         if self.conf.LM == "vinai/bertweet-base":
             vocab_size += 1
         self.linear = Linear(vocab_size, self.conf.CLASSNUM)
@@ -268,7 +268,7 @@ class BertClsLayer(Module):
     def __init__(self, vocab_size, conf):
         super().__init__()
         self.conf = conf
-        self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
+        self.lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}")
         self.linear = Linear(vocab_size, self.conf.FeatureDim)
         self.dropout = Dropout(self.conf.DROPOUT)
 

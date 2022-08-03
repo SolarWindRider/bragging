@@ -39,7 +39,7 @@ if __name__ == '__main__':
     seed_all(conf.RANDSEED)
     logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 
-    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
+    tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
     model = SimpleBertModel(tokenizer.vocab_size, conf).to(device)
 
     train_set = MyDataset(tokenizer, conf, True)
@@ -144,7 +144,7 @@ if __name__ == '__main__':
 #     seed_all(conf.RANDSEED)
 #     logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 #
-#     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
+#     tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
 #     model = SimpleBertModel(tokenizer.vocab_size, conf).to(device)
 #
 #     train_set = MyDataset(tokenizer, conf, True)

@@ -1,6 +1,7 @@
 from nrclex import NRCLex
 from torch.utils.data import Dataset, DataLoader
-from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, Tanh, KLDivLoss, CrossEntropyLoss
+from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, Tanh, KLDivLoss, CrossEntropyLoss, \
+    GELU
 from torch.nn import functional as F
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer
@@ -80,9 +81,10 @@ class SimpleBertModel(Module):
         super().__init__()
         self.conf = conf
         if self.conf.LingFeature is not None:
-            self.embedding_lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM, output_hidden_states=True)
+            self.embedding_lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}",
+                                                                     output_hidden_states=True)
             self.attn_gate = AttnGating(self.conf)
-        self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
+        self.lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}")
         if self.conf.LM == "vinai/bertweet-base":
             vocab_size += 1
         self.linear = Linear(vocab_size, self.conf.FeatureDim)
@@ -266,8 +268,8 @@ class GanData(Dataset):
     def __len__(self):
         length = None
         if self.istrain is True:  # 训练集label为not类别的样本数量,并针对batchsize进行圆整
-            length = ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE * self.conf.Nsampling) * self.conf.BATCHSIZE
-        elif self.istrain is False:  # 乘以0.8是为了负采样
+            length = ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE) * self.conf.BATCHSIZE
+        elif self.istrain is False:
             length = len(self.data)
         return length
 
@@ -309,7 +311,7 @@ class BertClsLayer(Module):
     def __init__(self, vocab_size, conf):
         super().__init__()
         self.conf = conf
-        self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
+        self.lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}")
         self.linear = Linear(vocab_size, self.conf.FeatureDim)
         self.dropout = Dropout(self.conf.DROPOUT)
 
@@ -328,11 +330,11 @@ class Generator(Module):
         super().__init__()
         self.conf = conf
         self.bert_cls_layer = BertClsLayer(vocab_size, self.conf)
-        self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
-                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
-                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
+        self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Linear(1024, 512), GELU(), Dropout(),
+                                Linear(512, 1024), GELU(), Dropout(), Linear(1024, self.conf.FeatureDim))
+        self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Linear(1024, 512), GELU(), Dropout(),
+                                Linear(512, 1024), GELU(), Dropout(), Linear(1024, self.conf.FeatureDim))
+        self.clf = Sequential(Linear(1024, 256), GELU(), Linear(256, self.conf.CLASSNUM))
         # 损失函数定义在模型类的内部
         self.KLloss_c = KLDivLoss(reduction="batchmean", log_target=True)
         self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
@@ -346,16 +348,16 @@ class Generator(Module):
 
         if mode is "test":
             cls = self.bert_cls_layer(inputs)
-            h_c = self.mlp_c(cls)
-            h_t = self.mlp_t(cls)
-            pred = self.clf(torch.add(h_c, h_t))
+            pred = self.clf(cls)
             return pred
 
         else:
             disentangled_features = []  # [{"h_c": h_c, "h_t": h_t}, {}, ...]
+            h_reps = []
             for each in inputs:
                 # feature disentangle, get h_c, h_t
                 cls = self.bert_cls_layer(each)
+                h_reps.append(cls)
                 h_c = self.mlp_c(cls)
                 h_t = self.mlp_t(cls)
                 disentangled_features.append({"h_c": h_c, "h_t": h_t})
@@ -363,19 +365,19 @@ class Generator(Module):
             # 特征重组
             # 每一个类别的h_t都要和其它类别的h_c重组一次
             # 元素在列表中的位置就是它的label
-            combined_features = [{"h_rep": [], "h_hat": []} for i in range(self.conf.CLASSNUM)]
+            combined_features = [{"h_rep": [], "h_hat": []} for _ in range(self.conf.CLASSNUM)]
             for i in range(self.conf.CLASSNUM):
                 for j in range(self.conf.CLASSNUM):
                     conbined_feature = torch.add(disentangled_features[i]["h_t"], disentangled_features[j]["h_c"])
-                    if i == j:  # 相同类别的特征组合
-                        combined_features[i]["h_rep"].append(conbined_feature)
+                    if i == j:  # 原来的真特征
+                        combined_features[i]["h_rep"].append(h_reps[i])
                     else:  # 不同类别的特征组合
                         combined_features[i]["h_hat"].append(conbined_feature)
             assert len(combined_features) == self.conf.CLASSNUM
 
             if mode is "train":
                 # 再次对重组的特征进行解耦
-                # disentangle_combined_features {"h_hat_c": [h_hat_c], "h_hat_t": [h_hat_t]}
+                # disentangle_combined_features的结构为 {"h_hat_c": [h_hat_c], "h_hat_t": [h_hat_t]}
                 h_hat_c = [torch.zeros((self.conf.BATCHSIZE, self.conf.FeatureDim),
                                        dtype=torch.float32, device=self.conf.DEVICE)
                            for _ in range(self.conf.CLASSNUM)]
@@ -403,11 +405,11 @@ class Generator(Module):
                     klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[i]["h_t"]),
                                               F.log_softmax(disentangle_combined_features["h_hat_t"][i], dim=1))
                     celoss_clf += self.CEloss_clf(self.clf(combined_features[i]["h_rep"][0]),
-                                                  # h_rep是解耦后重新还原的向量，每个类别只有一个
+                                                  # h_rep输入数据的特征向量，每个类别只有一个
                                                   torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
                                                                dtype=torch.long,
                                                                device=self.conf.DEVICE))
-                    for h_hat in combined_features[i]["h_hat"]:
+                    for h_hat in combined_features[i]["h_hat"]:  # h_rep特和解耦再重组得到特征向量，每个类别有类别数-1个
                         celoss_clf += self.CEloss_clf(self.clf(h_hat),
                                                       torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
                                                                    dtype=torch.long,
@@ -416,10 +418,7 @@ class Generator(Module):
                 klloss_t /= self.conf.CLASSNUM
                 celoss_clf /= self.conf.CLASSNUM ** 2
 
-                return klloss_c, klloss_t, celoss_clf
-
-            elif mode is "gen":
-                return combined_features
+                return klloss_c, klloss_t, celoss_clf, combined_features
 
             elif mode is "clf_only":  # 不进行gan训练，只训练生成器中的clf看看clf和采样方法的效果，仅用于开发过程
                 celoss_clf = 0.
@@ -436,22 +435,33 @@ class Discrimitor(Module):
     def __init__(self, conf):
         super().__init__()
         self.conf = conf
-        self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
+        self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Linear(1024, 512), GELU(), Dropout(),
                               Linear(512, 256),
-                              Tanh(), Linear(256, 2))
+                              GELU(), Linear(256, 2))
         self.MSEloss = CrossEntropyLoss()
 
-    def forward(self, combined_features):  # TODO 可人为划分范围
-        # 标签Fake为0,True为1
+    def forward(self, combined_features, trainmode="gen"):
+        # trainmode取值"gen"或"dis"
+        # 取值为dis时用于训练鉴别器，对于传入的特征，假特征标签Fake为0,真特征True为1
+        # 取值为gen时用于训练生成器，对于传入的特征，真特征忽略， 假特征打上真标签，希望loss回传时使得生成器更能生成优质的假特征
         celoss_d = 0.
-        for i in range(self.conf.CLASSNUM):
-            celoss_d += self.MSEloss(self.clf(combined_features[i]["h_rep"][0]),  # h_rep是解耦后重新还原的向量，每个类别只有一个
-                                     torch.tensor([1 for _ in range(self.conf.BATCHSIZE)], dtype=torch.long,
-                                                  device=self.conf.DEVICE))
-            for h_hat in combined_features[i]["h_hat"]:
-                celoss_d += self.MSEloss(self.clf(h_hat), torch.tensor([0 for _ in range(self.conf.BATCHSIZE)],
-                                                                       dtype=torch.long,
-                                                                       device=self.conf.DEVICE))
+        if trainmode is "dis":
+            for i in range(self.conf.CLASSNUM):
+                celoss_d += self.MSEloss(self.clf(combined_features[i]["h_rep"][0]),  # h_rep输入数据的特征向量，每个类别只有一个
+                                         torch.tensor([1 for _ in range(self.conf.BATCHSIZE)], dtype=torch.long,
+                                                      device=self.conf.DEVICE))
+                for h_hat in combined_features[i]["h_hat"]:  # h_rep特和解耦再重组得到特征向量，每个类别有类别数-1个
+                    celoss_d += self.MSEloss(self.clf(h_hat), torch.tensor([0 for _ in range(self.conf.BATCHSIZE)],
+                                                                           dtype=torch.long,
+                                                                           device=self.conf.DEVICE))
 
-        celoss_d /= self.conf.CLASSNUM ** 2
+            celoss_d /= self.conf.CLASSNUM ** 2  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
+        elif trainmode is "gen":
+            for i in range(self.conf.CLASSNUM):
+                for h_hat in combined_features[i]["h_hat"]:  # 假特征打上真标签
+                    celoss_d += self.MSEloss(self.clf(h_hat), torch.tensor([1 for _ in range(self.conf.BATCHSIZE)],
+                                                                           dtype=torch.long,
+                                                                           device=self.conf.DEVICE))
+
+            celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1))  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
         return celoss_d

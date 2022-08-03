@@ -21,7 +21,7 @@ if __name__ == '__main__':
     # args = parser.parse_args()
 
     device = conf.DEVICE
-    filepath = "./models/gan/"
+    filepath = "./models/gan/work1"
 
     # filepath = args.filepath
     # conf.device = args.device
@@ -33,10 +33,10 @@ if __name__ == '__main__':
     # conf.RANDSEED = args.random_seed
 
     seed_all(conf.RANDSEED)
-    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
+    tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
     genertator = Generator(len(tokenizer), conf).to(device)
     # genertator.load_state_dict(torch.load(f"./models/gan/g_clfonly_40epochs.pt", map_location=device))
-    genertator.load_state_dict(torch.load(f"./models/gan/g_clfonly_40epochs_0.6.pt", map_location=device))
+    genertator.load_state_dict(torch.load(f"./models/gan/work6/g.pt", map_location=device))
 
     test_set = GanData(tokenizer, conf, istrain=False)
     test_loader = DataLoader(test_set, batch_size=64)

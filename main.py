@@ -39,7 +39,7 @@ if __name__ == '__main__':
     logging.basicConfig(filename=f'./logs/{conf.MODLENAME}_clfonly_{conf.Nsampling}.log', level=logging.INFO)
     writer = SummaryWriter()
 
-    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
+    tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
     genertator = Generator(len(tokenizer), conf).to(conf.DEVICE)
 
     train_loader = GanTrainDataLoader(tokenizer, conf)
