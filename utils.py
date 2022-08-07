@@ -1,7 +1,7 @@
 from nrclex import NRCLex
 from torch.utils.data import Dataset, DataLoader
 from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, Tanh, KLDivLoss, CrossEntropyLoss, \
-    GELU
+    Tanh
 from torch.nn import functional as F
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer
@@ -75,25 +75,22 @@ def get_ling_feature(text, lingfeature) -> torch.Tensor:
     return outputs
 
 
-# --------------------------bragging原文的模型复现------------------------------------------------------
+# --------------------------bragging原文的模型复现 - -----------------------------------------------------
+
+
 class SimpleBertModel(Module):
     def __init__(self, vocab_size, conf):
         super().__init__()
         self.conf = conf
         if self.conf.LingFeature is not None:
-            self.embedding_lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}",
+            self.embedding_lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM,
                                                                      output_hidden_states=True)
             self.attn_gate = AttnGating(self.conf)
-        self.lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}")
+        self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
         if self.conf.LM == "vinai/bertweet-base":
             vocab_size += 1
-        self.linear = Linear(vocab_size, self.conf.FeatureDim)
+        self.linear = Linear(vocab_size, self.conf.CLASSNUM)
         self.dropout = Dropout(self.conf.DROPOUT)
-        self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
-                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
-                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
 
     def forward(self, inputs):
         if self.conf.LingFeature is not None:
@@ -111,48 +108,12 @@ class SimpleBertModel(Module):
         if self.conf.LMoutput:
             return cls
 
-        cls = self.linear(cls)  # shape (batch, FeatureDim)
-        cls = self.dropout(cls)
-        h_c = self.mlp_c(cls)
-        h_t = self.mlp_t(cls)
-        out = torch.add(h_c, h_t)
-        return out
+        outputs = self.dropout(cls)
+        outputs = torch.tanh(outputs)
+        outputs = self.dropout(outputs)
+        linear_output = self.linear(outputs)
+        return linear_output
 
-
-# class SimpleBertModel(Module):
-#     def __init__(self, vocab_size, conf):
-#         super().__init__()
-#         self.conf = conf
-#         if self.conf.LingFeature is not None:
-#             self.embedding_lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM, output_hidden_states=True)
-#             self.attn_gate = AttnGating(self.conf)
-#         self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
-#         if self.conf.LM == "vinai/bertweet-base":
-#             vocab_size += 1
-#         self.linear = Linear(vocab_size, self.conf.CLASSNUM)
-#         self.dropout = Dropout(self.conf.DROPOUT)
-#
-#     def forward(self, inputs):
-#         if self.conf.LingFeature is not None:
-#             _ = self.embedding_lm(input_ids=inputs["input_ids"],
-#                                   token_type_ids=inputs["token_type_ids"],
-#                                   attention_mask=inputs["attention_mask"])
-#             roberta_embed = _[1][0]
-#             combine_embed = self.attn_gate(roberta_embed, inputs["input_feature"])
-#             lm_output = self.lm(input_ids=None, token_type_ids=inputs["token_type_ids"],
-#                                 attention_mask=inputs["attention_mask"], inputs_embeds=combine_embed)
-#         else:
-#             lm_output = self.lm(input_ids=inputs["input_ids"], token_type_ids=inputs["token_type_ids"],
-#                                 attention_mask=inputs["attention_mask"])
-#         cls = lm_output.logits[:, 0, :]
-#         if self.conf.LMoutput:
-#             return cls
-#
-#         outputs = self.dropout(cls)
-#         outputs = torch.tanh(outputs)
-#         outputs = self.dropout(outputs)
-#         linear_output = self.linear(outputs)
-#         return linear_output
 
 class AttnGating(Module):
     def __init__(self, conf):
@@ -234,7 +195,7 @@ def get_loss_fig(loss_train_path="loss_train.pt"):
 
 # ------------设置seed-----------------------------------------------------------------
 def seed_all(seed_value):
-    random.seed(seed_value)  # Python
+    # random.seed(seed_value)  # Python
     np.random.seed(seed_value)  # cpu vars
     torch.manual_seed(seed_value)  # cpu vars
 
@@ -247,6 +208,8 @@ def seed_all(seed_value):
 # --------------------------------------------------------------------------------------#
 #                         feature disentangle model utils                               #
 # --------------------------------------------------------------------------------------#
+
+# ----------------------------------每次采样，每种类别各采一个batch-------------------------
 class GanData(Dataset):
     def __init__(self, tokenizer, conf, istrain, label=None):
         """
@@ -307,22 +270,71 @@ class GanTrainDataLoader(Iterator):
         return ceil(2838 * conf.EPOCHS / conf.BATCHSIZE)
 
 
+# -----------------------每次采样，一个batch为32，28个----------------------------------------------
+class GanDataSP2(Dataset):
+    def __init__(self, tokenizer, conf, istrain):
+        """
+        :param tokenizer: 传入已经实例化完成的tokenizer
+        :param conf: obj 传入配置文件
+        :param istrain: bool 是否载入训练数据
+        :param label: str 训练数据的具体类别， 只有istrain为True时才需要传入这个参数
+        """
+        self.tokenizer = tokenizer
+        self.conf = conf
+        self.istrain = istrain
+        # 读取数据
+        df = pd.read_csv(self.conf.DATAPATH)
+        self.df = df.sample(frac=1.0).reset_index(drop=True)
+
+        if istrain is True:
+            self.data = []
+            data0 = self.df[(self.df["sampling"] == "keyword") & (self.df["label"] == "not")][
+                ["text", "label"]].values
+            data_ = self.df[(self.df["sampling"] == "keyword") & (self.df["label"] != "not")][
+                ["text", "label"]].values
+            idx_ = 0
+            for idx in range(len(data0)):
+                if idx % 28 == 0:
+                    for i in range(4):
+                        self.data.append(data_[idx_ % len(data_)])
+                        idx_ += 1
+                    self.data.append(data0[idx])
+                else:
+                    self.data.append(data0[idx])
+        elif istrain is False:
+            self.data = df[df["sampling"] == "random"][["text", "label"]].values
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, item):
+        if self.istrain is True:
+            label = torch.tensor(self.conf.MULTI_CLASS_MAP[self.data[item % len(self.data)][1]])
+            inputs = self.tokenizer(self.data[item % len(self.data)][0], return_tensors="pt",
+                                    max_length=self.conf.MAXLENGTH, padding="max_length",
+                                    truncation=True)
+            return inputs, label
+        elif self.istrain is False:
+            label = torch.tensor(self.conf.MULTI_CLASS_MAP[self.data[item % len(self.data)][1]])
+            inputs = self.tokenizer(self.data[item % len(self.data)][0], return_tensors="pt",
+                                    max_length=self.conf.MAXLENGTH, padding="max_length",
+                                    truncation=True)
+            return inputs, label  # 注意，label不放在GPU里面
+
+
 class BertClsLayer(Module):
     def __init__(self, vocab_size, conf):
         super().__init__()
         self.conf = conf
-        self.lm = AutoModelForMaskedLM.from_pretrained(f"./orgmodels/{self.conf.LM}")
-        self.linear = Linear(vocab_size, self.conf.FeatureDim)
-        self.dropout = Dropout(self.conf.DROPOUT)
+        self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
 
     def forward(self, inputs):
         lm_output = self.lm(input_ids=inputs["input_ids"].squeeze(1),
                             token_type_ids=inputs["token_type_ids"].squeeze(1),
                             attention_mask=inputs["attention_mask"].squeeze(1))
         cls = lm_output.logits[:, 0, :]  # shape (batch, vocabsize)
-        cls = self.linear(cls)  # shape (batch, FeatureDim)
-        output = self.dropout(cls)
-        return output
+
+        return cls
 
 
 class Generator(Module):
@@ -330,11 +342,14 @@ class Generator(Module):
         super().__init__()
         self.conf = conf
         self.bert_cls_layer = BertClsLayer(vocab_size, self.conf)
-        self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Linear(1024, 512), GELU(), Dropout(),
-                                Linear(512, 1024), GELU(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Linear(1024, 512), GELU(), Dropout(),
-                                Linear(512, 1024), GELU(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        self.clf = Sequential(Linear(1024, 256), GELU(), Linear(256, self.conf.CLASSNUM))
+        self.linear = Linear(vocab_size, self.conf.FeatureDim)
+        self.dropout = Dropout(self.conf.DROPOUT)
+
+        self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
+                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
+        self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
+                                Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
+        self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
         # 损失函数定义在模型类的内部
         self.KLloss_c = KLDivLoss(reduction="batchmean", log_target=True)
         self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
@@ -348,16 +363,22 @@ class Generator(Module):
 
         if mode is "test":
             cls = self.bert_cls_layer(inputs)
+            cls = self.linear(cls)  # shape (batch, FeatureDim)
+            cls = self.dropout(cls)
             pred = self.clf(cls)
             return pred
 
         else:
             disentangled_features = []  # [{"h_c": h_c, "h_t": h_t}, {}, ...]
-            h_reps = []
+            # h_reps = []
             for each in inputs:
                 # feature disentangle, get h_c, h_t
                 cls = self.bert_cls_layer(each)
-                h_reps.append(cls)
+                cls = self.linear(cls)  # shape (batch, FeatureDim)
+                cls = self.dropout(cls)
+                # h_reps.append(cls)
+                # cls_c = cls.detach()
+                # cls_t = cls.detach()
                 h_c = self.mlp_c(cls)
                 h_t = self.mlp_t(cls)
                 disentangled_features.append({"h_c": h_c, "h_t": h_t})
@@ -370,7 +391,8 @@ class Generator(Module):
                 for j in range(self.conf.CLASSNUM):
                     conbined_feature = torch.add(disentangled_features[i]["h_t"], disentangled_features[j]["h_c"])
                     if i == j:  # 原来的真特征
-                        combined_features[i]["h_rep"].append(h_reps[i])
+                        # combined_features[i]["h_rep"].append(h_reps[i])
+                        combined_features[i]["h_rep"].append(conbined_feature)
                     else:  # 不同类别的特征组合
                         combined_features[i]["h_hat"].append(conbined_feature)
             assert len(combined_features) == self.conf.CLASSNUM
@@ -399,19 +421,23 @@ class Generator(Module):
                 disentangle_combined_features = {"h_hat_c": h_hat_c, "h_hat_t": h_hat_t}
 
                 klloss_c, klloss_t, celoss_clf = 0., 0., 0.
+                shuffleidx = [_ for _ in range(self.conf.CLASSNUM)]
+                random.shuffle(shuffleidx)
                 for i in range(self.conf.CLASSNUM):
-                    klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[i]["h_c"]),
-                                              F.log_softmax(disentangle_combined_features["h_hat_c"][i], dim=1))
-                    klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[i]["h_t"]),
-                                              F.log_softmax(disentangle_combined_features["h_hat_t"][i], dim=1))
-                    celoss_clf += self.CEloss_clf(self.clf(combined_features[i]["h_rep"][0]),
+                    klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[shuffleidx[i]]["h_c"]),
+                                              F.log_softmax(disentangle_combined_features["h_hat_c"][shuffleidx[i]],
+                                                            dim=1))
+                    klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[shuffleidx[i]]["h_t"]),
+                                              F.log_softmax(disentangle_combined_features["h_hat_t"][shuffleidx[i]],
+                                                            dim=1))
+                    celoss_clf += self.CEloss_clf(self.clf(combined_features[shuffleidx[i]]["h_rep"][0]),
                                                   # h_rep输入数据的特征向量，每个类别只有一个
-                                                  torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
+                                                  torch.tensor([shuffleidx[i] for _ in range(self.conf.BATCHSIZE)],
                                                                dtype=torch.long,
                                                                device=self.conf.DEVICE))
-                    for h_hat in combined_features[i]["h_hat"]:  # h_rep特和解耦再重组得到特征向量，每个类别有类别数-1个
+                    for h_hat in combined_features[shuffleidx[i]]["h_hat"]:  # h_rep特和解耦再重组得到特征向量，每个类别有类别数-1个
                         celoss_clf += self.CEloss_clf(self.clf(h_hat),
-                                                      torch.tensor([i for _ in range(self.conf.BATCHSIZE)],
+                                                      torch.tensor([shuffleidx[i] for _ in range(self.conf.BATCHSIZE)],
                                                                    dtype=torch.long,
                                                                    device=self.conf.DEVICE))
                 klloss_c /= self.conf.CLASSNUM
@@ -435,9 +461,9 @@ class Discrimitor(Module):
     def __init__(self, conf):
         super().__init__()
         self.conf = conf
-        self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Linear(1024, 512), GELU(), Dropout(),
+        self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
                               Linear(512, 256),
-                              GELU(), Linear(256, 2))
+                              Tanh(), Linear(256, 2))
         self.MSEloss = CrossEntropyLoss()
 
     def forward(self, combined_features, trainmode="gen"):

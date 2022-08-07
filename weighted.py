@@ -1,9 +1,10 @@
 import pickle
 
-from utils import MyDataset, SimpleBertModel, seed_all
+from utils import MyDataset, SimpleBertModel, seed_all, GanData
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.utils.tensorboard import SummaryWriter
 from torch.nn import CrossEntropyLoss
 from sklearn.utils.class_weight import compute_class_weight
 import conf
@@ -11,6 +12,9 @@ from tqdm import tqdm
 import argparse
 import torch
 import logging
+import warnings
+
+warnings.filterwarnings("ignore")
 
 if __name__ == '__main__':
     # 单卡单模型训练
@@ -24,8 +28,8 @@ if __name__ == '__main__':
     # parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
     # args = parser.parse_args()
 
-    device = "cuda:1"
-    filepath = "./models/weighted/"
+    device = "cuda:0"
+    filepath = "./models/sampling/"
 
     # device = args.device
     # filepath = args.filepath
@@ -37,18 +41,19 @@ if __name__ == '__main__':
     # conf.RANDSEED = args.random_seed
 
     seed_all(conf.RANDSEED)
-    logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
-
-    tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
+    logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}.log', level=logging.INFO)
+    writer = SummaryWriter(f'./runs/{conf.MODLENAME}')
+    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     model = SimpleBertModel(tokenizer.vocab_size, conf).to(device)
 
     train_set = MyDataset(tokenizer, conf, True)
+    # train_set = GanData(tokenizer, conf, istrain=True)
     train_loader = DataLoader(
         train_set,
         batch_size=conf.BATCHSIZE,
         num_workers=4,
         pin_memory=True,
-        shuffle=True
+        shuffle=False
     )
 
     param_optimizer = list(model.named_parameters())
@@ -60,18 +65,19 @@ if __name__ == '__main__':
          'weight_decay': 0.0}
     ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=3e-6)
-
-    class_map = {}
-    if conf.CLASSNUM == 7:
-        class_map = conf.MULTI_CLASS_MAP
-    elif conf.CLASSNUM == 2:
-        class_map = conf.BIN_CLASS_MAP
-    weight_loss = compute_class_weight('balanced', classes=list(class_map.keys()), y=train_set.data[:, 1])
-    weight = torch.tensor(weight_loss, device=device)
-    loss_fn = CrossEntropyLoss(ignore_index=-100, reduction='mean')
+    # class_map = {}
+    # if conf.CLASSNUM == 7:
+    #     class_map = conf.MULTI_CLASS_MAP
+    # elif conf.CLASSNUM == 2:
+    #     class_map = conf.BIN_CLASS_MAP
+    # weight_loss = compute_class_weight('balanced', classes=list(class_map.keys()), y=train_set.data[:, 1])
+    # weight = torch.tensor(weight_loss, device=device, dtype=torch.float)
+    # loss_fn = CrossEntropyLoss(weight)
+    loss_fn = CrossEntropyLoss()
 
     logging.info("training start")
-    loss_train_li = []
+    print(conf.MODLENAME)
+    total_step = 0
     best_loss_train = 1e5
     for ep in range(conf.EPOCHS):
         model.train()
@@ -88,21 +94,21 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss_train_.backward()
             optimizer.step()
-        model.eval()
+            writer.add_scalar("loss_train", loss_train, total_step)
+
+            total_step += 1
 
         if loss_train < best_loss_train:
             best_loss_train = loss_train
             torch.save(model.state_dict(),
-                       f"{filepath}/best_loss_train_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
+                       f"{filepath}/best_loss_train_{conf.MODLENAME}.pt")
             logging.info(f"best_loss_train model saved, loss: {best_loss_train}")
 
-        loss_train_li.append(loss_train)
     torch.save(model.state_dict(),
-               f"{filepath}/{conf.EPOCHS}epochs_finished_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
+               f"{filepath}/{conf.EPOCHS}epochs_finished_{conf.MODLENAME}.pt")
     logging.info(f"{conf.EPOCHS}epochs training finished. model saved")
 
-    pickle.dump(loss_train_li, open(f"{conf.MODLENAME}_loss_train.pt", "wb"))
-
+    # pickle.dump(loss_train_li, open(f"{conf.MODLENAME}_loss_train.pt", "wb"))
 
 # import pickle
 #
@@ -144,7 +150,7 @@ if __name__ == '__main__':
 #     seed_all(conf.RANDSEED)
 #     logging.basicConfig(filename=f'./logs/nrc_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
 #
-#     tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
+#     tokenizer = AutoTokenizer.from_pretrained(f"conf.LM")
 #     model = SimpleBertModel(tokenizer.vocab_size, conf).to(device)
 #
 #     train_set = MyDataset(tokenizer, conf, True)

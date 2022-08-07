@@ -13,33 +13,33 @@ warnings.filterwarnings("ignore")
 
 if __name__ == '__main__':
     # 单卡单模型训练
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-dv", "--device", help="which device to load model and data", type=str)
-    parser.add_argument("-lm", "--languagemodel", help="pretrained language model name", type=str)
-    parser.add_argument("-n", "--model_name", help="model name to save", type=str)
-    parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int, default=7)
-    parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
-    parser.add_argument("-lf", "--linguestic_feature", help="filepath to save trained model", type=str, default=None)
-    parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("-dv", "--device", help="which device to load model and data", type=str)
+    # parser.add_argument("-lm", "--languagemodel", help="pretrained language model name", type=str)
+    # parser.add_argument("-n", "--model_name", help="model name to save", type=str)
+    # parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int, default=7)
+    # parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
+    # parser.add_argument("-lf", "--linguestic_feature", help="filepath to save trained model", type=str, default=None)
+    # parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
+    # args = parser.parse_args()
 
-    # device = conf.DEVICE
-    # filepath = "./models/gan/"
+    device = conf.DEVICE
+    filepath = "./models/gan/"
 
-    filepath = args.filepath
-    conf.DEVICE = args.device
-    conf.CLASSNUM = args.classnum
-    conf.LM = args.languagemodel
-    conf.MODLENAME = args.model_name
-    conf.DATAPATH = "./dataset/bragging_data.csv"
-    conf.LingFeature = args.linguestic_feature
-    conf.RANDSEED = args.random_seed
+    # filepath = args.filepath
+    # conf.DEVICE = args.device
+    # conf.CLASSNUM = args.classnum
+    # conf.LM = args.languagemodel
+    # conf.MODLENAME = args.model_name
+    # conf.DATAPATH = "./dataset/bragging_data.csv"
+    # conf.LingFeature = args.linguestic_feature
+    # conf.RANDSEED = args.random_seed
 
     seed_all(conf.RANDSEED)
     logging.basicConfig(filename=f'./logs/{conf.MODLENAME}.log', level=logging.INFO)
     writer = SummaryWriter(f'./runs/{conf.MODLENAME}')
 
-    tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
+    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     genertator = Generator(len(tokenizer), conf).to(conf.DEVICE)
     discriminitor = Discrimitor(conf).to(conf.DEVICE)
 
@@ -53,14 +53,14 @@ if __name__ == '__main__':
         {'params': [p for n, p in genertator.named_parameters() if any(nd in n for nd in no_decay)],
          'weight_decay': 0.0}
     ]
-    d_optimizer = AdamW(discriminitor.parameters(), lr=3e-4)
-    g_optimizer = AdamW([{"params": genertator.mlp_c.parameters(), "lr": 3e-4},
-                         {"params": genertator.mlp_t.parameters(), "lr": 3e-4},
-                         {"params": genertator.clf.parameters(), "lr": 3e-4},
-                         ], lr=3e-6)
+    d_optimizer = AdamW(discriminitor.parameters(), lr=3e-6)
+    # g_optimizer = AdamW([{"params": genertator.mlp_c.parameters(), "lr": 3e-4},
+    #                      {"params": genertator.mlp_t.parameters(), "lr": 3e-4},
+    #                      {"params": genertator.clf.parameters(), "lr": 3e-4},
+    #                      ], lr=3e-6)
 
+    g_optimizer = AdamW(genertator.parameters(), lr=3e-6)
 
-    # g_optimizer = AdamW(genertator.parameters(), lr=3e-6)
 
     def reset_grad():
         d_optimizer.zero_grad()

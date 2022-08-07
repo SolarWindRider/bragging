@@ -23,11 +23,13 @@ if __name__ == '__main__':
     # tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     # model = MyModel(tokenizer.vocab_size, conf).load_state_dict(torch.load(f"./models/{conf.MODLENAME}"))
 
-    device = "cuda:0"
-    tokenizer = AutoTokenizer.from_pretrained(f"./orgmodels/{conf.LM}")
+    device = conf.DEVICE
+    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     model = SimpleBertModel(tokenizer.vocab_size, conf)
     # model.load_state_dict(torch.load(f"./models/nrc/{conf.MODLENAME}.pt", map_location=device))
-    model.load_state_dict(torch.load(f"./models/weighted/best_loss_train_gan_clfonly_Nsampling_7class.pt", map_location=device))
+    # model.load_state_dict(torch.load(f"./models/sampling/40epochs_finished_sampling0_noseed_weight.pt", map_location=device))
+    # model.load_state_dict(torch.load(f"./models/weighted/40epochs_finished_nrc_7class.pt", map_location=device))
+    model.load_state_dict(torch.load(f"./models/sampling/best_loss_train_sp2rand4ep.pt", map_location=device))
     model.to(device)
 
     dataset = MyDataset(tokenizer, conf, False)
