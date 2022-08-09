@@ -1,7 +1,7 @@
 from nrclex import NRCLex
 from torch.utils.data import Dataset, DataLoader
-from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, Tanh, KLDivLoss, CrossEntropyLoss, \
-    Tanh
+from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, MSELoss, KLDivLoss, \
+    CrossEntropyLoss, Tanh
 from torch.nn import functional as F
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer
@@ -323,7 +323,7 @@ class GanDataSP2(Dataset):
 
 
 class BertClsLayer(Module):
-    def __init__(self, vocab_size, conf):
+    def __init__(self, conf):
         super().__init__()
         self.conf = conf
         self.lm = AutoModelForMaskedLM.from_pretrained(self.conf.LM)
@@ -341,7 +341,7 @@ class Generator(Module):
     def __init__(self, vocab_size, conf):
         super().__init__()
         self.conf = conf
-        self.bert_cls_layer = BertClsLayer(vocab_size, self.conf)
+        self.bert_cls_layer = BertClsLayer(self.conf)
         self.linear = Linear(vocab_size, self.conf.FeatureDim)
         self.dropout = Dropout(self.conf.DROPOUT)
 
@@ -370,17 +370,23 @@ class Generator(Module):
 
         else:
             disentangled_features = []  # [{"h_c": h_c, "h_t": h_t}, {}, ...]
-            # h_reps = []
+            if self.conf.fd_h_rep is False:
+                h_reps = []
             for each in inputs:
                 # feature disentangle, get h_c, h_t
                 cls = self.bert_cls_layer(each)
                 cls = self.linear(cls)  # shape (batch, FeatureDim)
                 cls = self.dropout(cls)
-                # h_reps.append(cls)
-                # cls_c = cls.detach()
-                # cls_t = cls.detach()
-                h_c = self.mlp_c(cls)
-                h_t = self.mlp_t(cls)
+                if self.conf.fd_h_rep is False:
+                    self.h_reps.append(cls)
+                if self.conf.loss_back_to_bert is False:
+                    cls_c = cls.detach()
+                    cls_t = cls.detach()
+                    h_c = self.mlp_c(cls_c)
+                    h_t = self.mlp_t(cls_t)
+                else:
+                    h_c = self.mlp_c(cls)
+                    h_t = self.mlp_t(cls)
                 disentangled_features.append({"h_c": h_c, "h_t": h_t})
             assert len(disentangled_features) == self.conf.CLASSNUM
             # 特征重组
@@ -391,8 +397,10 @@ class Generator(Module):
                 for j in range(self.conf.CLASSNUM):
                     conbined_feature = torch.add(disentangled_features[i]["h_t"], disentangled_features[j]["h_c"])
                     if i == j:  # 原来的真特征
-                        # combined_features[i]["h_rep"].append(h_reps[i])
-                        combined_features[i]["h_rep"].append(conbined_feature)
+                        if self.conf.fd_h_rep is False:
+                            combined_features[i]["h_rep"].append(h_reps[i])
+                        else:
+                            combined_features[i]["h_rep"].append(conbined_feature)
                     else:  # 不同类别的特征组合
                         combined_features[i]["h_hat"].append(conbined_feature)
             assert len(combined_features) == self.conf.CLASSNUM
@@ -465,6 +473,7 @@ class Discrimitor(Module):
                               Linear(512, 256),
                               Tanh(), Linear(256, 2))
         self.MSEloss = CrossEntropyLoss()
+        # self.MSEloss = MSELoss()
 
     def forward(self, combined_features, trainmode="gen"):
         # trainmode取值"gen"或"dis"
