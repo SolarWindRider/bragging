@@ -2,6 +2,8 @@ from utils import GanTrainDataLoader, Generator, Discrimitor, seed_all
 from transformers import AutoTokenizer
 from torch.optim import AdamW
 from torch.nn.utils import clip_grad_value_
+from torch.nn import Linear
+from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 import conf
 from tqdm import tqdm
@@ -17,20 +19,27 @@ if __name__ == '__main__':
     # 单卡单模型训练
     parser = argparse.ArgumentParser()
     parser.add_argument("-dv", "--device", help="which device to load model and data", type=str)
-    parser.add_argument("-lm", "--languagemodel", help="pretrained language model name", type=str)
+    parser.add_argument("-lm", "--languagemodel", help="pretrained language model name", type=str,
+                        default="vinai/bertweet-base")
     parser.add_argument("-n", "--model_name", help="model name to save", type=str)
     parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int, default=7)
-    parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
+    parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str, default="./models/gan/")
     parser.add_argument("-lf", "--linguestic_feature", help="filepath to save trained model", type=str, default=None)
-    parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
+    parser.add_argument("-sd", "--random_seed", help="set random seed", type=int, default=3407)
     parser.add_argument("-h_rep", "--fd_h_rep", help="whether feature recombine h_i", type=bool)
     parser.add_argument("-loss2bert", "--loss_back_to_bert", help="whether loss_back_to_bert", type=bool)
     parser.add_argument("-d_lr", "--discriminitor_learning_rate", type=float, default=3e-6)
     parser.add_argument("-g_lr", "--generator_learning_rate", type=float, default=3e-6)
+    parser.add_argument("-d_extra", "--extra_steps4discriminitor", type=float, default=0.1)
+    parser.add_argument("-fst_d_extra", "--first_epoch_extra_steps4discriminitor", type=float, default=0.6)
     args = parser.parse_args()
 
     # device = conf.DEVICE
     # filepath = "./models/gan/"
+    # d_lr = 3e-4
+    # g_lr = 3e-6
+    # d_extra = 0.2
+    # fst_d_extra = 0.6
 
     filepath = args.filepath
     d_lr = args.discriminitor_learning_rate
@@ -44,6 +53,8 @@ if __name__ == '__main__':
     conf.fd_h_rep = args.fd_h_rep
     conf.loss_back_to_bert = args.loss_back_to_bert
     conf.RANDSEED = args.random_seed
+    d_extra = args.extra_steps4discriminitor
+    fst_d_extra = args.first_epoch_extra_steps4discriminitor
 
     seed_all(conf.RANDSEED)
     logging.basicConfig(filename=f'./logs/{conf.MODLENAME}.log', level=logging.INFO)
@@ -52,6 +63,9 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     genertator = Generator(len(tokenizer), conf).to(conf.DEVICE)
     discriminitor = Discrimitor(conf).to(conf.DEVICE)
+    for m in discriminitor.modules():  # 鉴别器初始化
+        if isinstance(m, (Linear)):
+            nn.init.xavier_uniform_(m.weight)
 
     train_loader = GanTrainDataLoader(tokenizer, conf)
 
@@ -89,12 +103,15 @@ if __name__ == '__main__':
         loss_D = discriminitor(combined_features, trainmode="dis")
         reset_grad()
         loss_D.backward(retain_graph=True)
-        clip_grad_value_(discriminitor.parameters(), 1.0)  # 对鉴别器进行梯度裁剪
+        # clip_grad_value_(discriminitor.parameters(), 1.0)  # 对鉴别器进行梯度裁剪
         d_optimizer.step()
         writer.add_scalar("loss_D", loss_D.item(), total_step)
-        if total_step % ceil(2838 / conf.BATCHSIZE) < ceil(2838 / conf.BATCHSIZE * 0.1):
+        if total_step < ceil(2838 / conf.BATCHSIZE * fst_d_extra):
+            total_step += 1  # 第一个epoch多训练鉴别器
+            continue
+        elif total_step % ceil(2838 / conf.BATCHSIZE) < ceil(2838 / conf.BATCHSIZE * d_extra):
             total_step += 1
-            continue  # 每个epoch
+            continue
 
         # ================================================================== #
         #                        Train the generator                         #

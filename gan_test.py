@@ -36,7 +36,7 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     genertator = Generator(len(tokenizer), conf).to(device)
     # genertator.load_state_dict(torch.load(f"./models/gan/g_clfonly_40epochs.pt", map_location=device))
-    genertator.load_state_dict(torch.load(f"./models/gan/g_fd12.pt", map_location=device))
+    genertator.load_state_dict(torch.load(f"./models/gan/g_fd20.pt", map_location=device))
 
     test_set = GanData(tokenizer, conf, istrain=False)
     test_loader = DataLoader(test_set, batch_size=64)

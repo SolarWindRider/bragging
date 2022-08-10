@@ -1,7 +1,7 @@
 from nrclex import NRCLex
 from torch.utils.data import Dataset, DataLoader
 from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, MSELoss, KLDivLoss, \
-    CrossEntropyLoss, Tanh
+    CrossEntropyLoss, BCELoss, Sigmoid, Tanh, GELU
 from torch.nn import functional as F
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer
@@ -378,7 +378,7 @@ class Generator(Module):
                 cls = self.linear(cls)  # shape (batch, FeatureDim)
                 cls = self.dropout(cls)
                 if self.conf.fd_h_rep is False:
-                    self.h_reps.append(cls)
+                    h_reps.append(cls)
                 if self.conf.loss_back_to_bert is False:
                     cls_c = cls.detach()
                     cls_t = cls.detach()
@@ -465,38 +465,92 @@ class Generator(Module):
                 return celoss_clf
 
 
+# ---------------------------------Binary Cross Entropy---------------------------------------------
 class Discrimitor(Module):
     def __init__(self, conf):
         super().__init__()
         self.conf = conf
-        self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
-                              Linear(512, 256),
-                              Tanh(), Linear(256, 2))
-        self.MSEloss = CrossEntropyLoss()
-        # self.MSEloss = MSELoss()
+        # self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Dropout(),
+        #                       Linear(1024, 512), Tanh(), Dropout(),
+        #                       Linear(512, 256), Tanh(), Dropout(),
+        #                       Linear(256, 1), Sigmoid())
+        self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), GELU(), Dropout(),
+                              Linear(1024, 512), GELU(), Dropout(),
+                              Linear(512, 256), GELU(), Dropout(),
+                              Linear(256, 1), Sigmoid())
+        self.bceloss = BCELoss()
 
     def forward(self, combined_features, trainmode="gen"):
         # trainmode取值"gen"或"dis"
         # 取值为dis时用于训练鉴别器，对于传入的特征，假特征标签Fake为0,真特征True为1
         # 取值为gen时用于训练生成器，对于传入的特征，真特征忽略， 假特征打上真标签，希望loss回传时使得生成器更能生成优质的假特征
         celoss_d = 0.
+        h_rep, h_hat = [], []
         if trainmode is "dis":
             for i in range(self.conf.CLASSNUM):
-                celoss_d += self.MSEloss(self.clf(combined_features[i]["h_rep"][0]),  # h_rep输入数据的特征向量，每个类别只有一个
-                                         torch.tensor([1 for _ in range(self.conf.BATCHSIZE)], dtype=torch.long,
+                h_rep += combined_features[i]["h_rep"]
+                h_hat += combined_features[i]["h_hat"]
+            for i in range(self.conf.CLASSNUM * (self.conf.CLASSNUM - 1)):
+                celoss_d += self.bceloss(self.clf(h_rep[i % self.conf.CLASSNUM]).squeeze(),  # h_rep重复采样，确保真实特征与合成特征数量一致
+                                         torch.tensor([1 for _ in range(self.conf.BATCHSIZE)], dtype=torch.float,
                                                       device=self.conf.DEVICE))
-                for h_hat in combined_features[i]["h_hat"]:  # h_rep特和解耦再重组得到特征向量，每个类别有类别数-1个
-                    celoss_d += self.MSEloss(self.clf(h_hat), torch.tensor([0 for _ in range(self.conf.BATCHSIZE)],
-                                                                           dtype=torch.long,
-                                                                           device=self.conf.DEVICE))
+                celoss_d += self.bceloss(self.clf(h_hat[i]).squeeze(),
+                                         torch.tensor([0 for _ in range(self.conf.BATCHSIZE)],
+                                                      dtype=torch.float,
+                                                      device=self.conf.DEVICE))
 
-            celoss_d /= self.conf.CLASSNUM ** 2  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
+            # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
+            celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1) * 2)
         elif trainmode is "gen":
             for i in range(self.conf.CLASSNUM):
                 for h_hat in combined_features[i]["h_hat"]:  # 假特征打上真标签
-                    celoss_d += self.MSEloss(self.clf(h_hat), torch.tensor([1 for _ in range(self.conf.BATCHSIZE)],
-                                                                           dtype=torch.long,
-                                                                           device=self.conf.DEVICE))
+                    celoss_d += self.bceloss(self.clf(h_hat).squeeze(),
+                                             torch.tensor([1 for _ in range(self.conf.BATCHSIZE)],
+                                                          dtype=torch.float,
+                                                          device=self.conf.DEVICE))
 
             celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1))  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
         return celoss_d
+
+# ------------------Cross Entropy -----------------------------------------------------
+# class Discrimitor(Module):
+#     def __init__(self, conf):
+#         super().__init__()
+#         self.conf = conf
+#         self.clf = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Dropout(),
+#                               Linear(1024, 512), Tanh(), Dropout(),
+#                               Linear(512, 256), Tanh(), Dropout(),
+#                               Linear(256, 2))
+#         self.MSEloss = CrossEntropyLoss()
+#         # self.MSEloss = MSELoss()
+#
+#     def forward(self, combined_features, trainmode="gen"):
+#         # trainmode取值"gen"或"dis"
+#         # 取值为dis时用于训练鉴别器，对于传入的特征，假特征标签Fake为0,真特征True为1
+#         # 取值为gen时用于训练生成器，对于传入的特征，真特征忽略， 假特征打上真标签，希望loss回传时使得生成器更能生成优质的假特征
+#         celoss_d = 0.
+#         h_rep, h_hat = [], []
+#         if trainmode is "dis":
+#             for i in range(self.conf.CLASSNUM):
+#                 h_rep += combined_features[i]["h_rep"]
+#                 h_hat += combined_features[i]["h_hat"]
+#             for i in range(self.conf.CLASSNUM * (self.conf.CLASSNUM - 1)):
+#                 celoss_d += self.MSEloss(self.clf(h_rep[i % self.conf.CLASSNUM]),  # h_rep重复采样，确保真实特征与合成特征数量一致
+#                                          torch.tensor([1 for _ in range(self.conf.BATCHSIZE)], dtype=torch.long,
+#                                                       device=self.conf.DEVICE))
+#                 celoss_d += self.MSEloss(self.clf(h_hat[i]),
+#                                          torch.tensor([0 for _ in range(self.conf.BATCHSIZE)],
+#                                                       dtype=torch.long,
+#                                                       device=self.conf.DEVICE))
+#
+#             # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
+#             celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1) * 2)
+#         elif trainmode is "gen":
+#             for i in range(self.conf.CLASSNUM):
+#                 for h_hat in combined_features[i]["h_hat"]:  # 假特征打上真标签
+#                     celoss_d += self.MSEloss(self.clf(h_hat), torch.tensor([1 for _ in range(self.conf.BATCHSIZE)],
+#                                                                            dtype=torch.long,
+#                                                                            device=self.conf.DEVICE))
+#
+#             celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1))  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
+#         return celoss_d
