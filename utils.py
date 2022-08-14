@@ -15,11 +15,10 @@ import numpy as np
 from collections import Iterator
 from math import ceil
 from sklearn.metrics import precision_score, recall_score, f1_score
-
-# ----------------------------没有验证集----------------------------------------
 import conf
 
 
+# ----------------------------没有验证集----------------------------------------
 class MyDataset(Dataset):
     def __init__(self, tokenizer, conf, istrain=True):
         """
@@ -345,23 +344,26 @@ class Generator(Module):
         self.conf = conf
         self.bert_cls_layer = BertClsLayer(self.conf)
         self.linear = Linear(vocab_size, self.conf.FeatureDim)
-        xavier_uniform_(self.linear.weight)
         self.dropout = Dropout(self.conf.DROPOUT)
 
         self.mlp_c = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
                                 Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        for m in self.mlp_c.modules():
-            if isinstance(m, Linear):
-                xavier_uniform_(m.weight)
+
         self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
                                 Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
-        for m in self.mlp_t.modules():
-            if isinstance(m, Linear):
-                xavier_uniform_(m.weight)
+
         self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
-        for m in self.clf.modules():
-            if isinstance(m, Linear):
-                xavier_uniform_(m.weight)
+        if self.conf.isMLPinit is True:
+            xavier_uniform_(self.linear.weight)
+            for m in self.mlp_c.modules():
+                if isinstance(m, Linear):
+                    xavier_uniform_(m.weight)
+            for m in self.mlp_t.modules():
+                if isinstance(m, Linear):
+                    xavier_uniform_(m.weight)
+            for m in self.clf.modules():
+                if isinstance(m, Linear):
+                    xavier_uniform_(m.weight)
         # 损失函数定义在模型类的内部
         self.KLloss_c = KLDivLoss(reduction="batchmean", log_target=True)
         self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
@@ -442,7 +444,8 @@ class Generator(Module):
 
                 klloss_c, klloss_t, celoss_clf = 0., 0., 0.
                 shuffleidx = [_ for _ in range(self.conf.CLASSNUM)]
-                # random.shuffle(shuffleidx) # 打开或关闭shuffle
+                if self.conf.isClassShuffle is True:
+                    random.shuffle(shuffleidx)  # 打开或关闭shuffle
                 for i in range(self.conf.CLASSNUM):
                     klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[shuffleidx[i]]["h_c"]),
                                               F.log_softmax(disentangle_combined_features["h_hat_c"][shuffleidx[i]],
@@ -487,10 +490,12 @@ class Discrimitor(Module):
                               Linear(1024, 512), Tanh(), Dropout(),
                               Linear(512, 256), Tanh(), Dropout(),
                               Linear(256, 1), Sigmoid())
-        for m in self.clf.modules():
-            if isinstance(m, Linear):
-                xavier_uniform_(m.weight)
+
         self.bceloss = BCELoss()
+        if self.conf.isMLPinit is True:
+            for m in self.clf.modules():
+                if isinstance(m, Linear):
+                    xavier_uniform_(m.weight)
 
     def forward(self, combined_features, trainmode="gen"):
         # trainmode取值"gen"或"dis"

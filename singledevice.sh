@@ -45,3 +45,13 @@ nohup python feature_disentangle.py -dv cuda:2 -n f35 -h_rep True -loss2bert Tru
 nohup python feature_disentangle.py -dv cuda:0 -n p1 -a 1.0 -b 1.0 -c 1.0 -d 1.0 &
 nohup python feature_disentangle.py -dv cuda:1 -n p2 -a 0.8 -b 0.8 -c 1.0 -d 0.8 &
 nohup python feature_disentangle.py -dv cuda:2 -n p3 -a 0.6 -b 0.6 -c 1.0 -d 0.6 &
+nohup python feature_disentangle.py -dv cuda:2 -n p4 -a 0.7 -b 0.7 -c 1.0 -d 0.7 &
+
+nohup python feature_disentangle.py -dv cuda:0 -n p9 -a 0.9 -b 0.9 -c 1.0 -d 0.9 & # 这里的mlpinit是True,运行之后重改了代码
+nohup python feature_disentangle.py -dv cuda:1 -n p5 -a 1.0 -b 1.0 -c 1.0 -d 1.0 &
+nohup python feature_disentangle.py -dv cuda:2 -n p6 -a 0.9 -b 0.9 -c 1.0 -d 0.9 &
+
+nohup python feature_disentangle.py -dv cuda:0 -n p7  -isClassShuffle False -ismlpinit True  -ep 40 -a 1.0 -b 1.0 -c 1.0 -d 1.0 &
+nohup python feature_disentangle.py -dv cuda:1 -n p8  -isClassShuffle False -ismlpinit True  -ep 80 -a 0.9 -b 0.9 -c 1.0 -d 0.9 &
+nohup python feature_disentangle.py -dv cuda:2 -n p10 -isClassShuffle True  -ismlpinit False -ep 50 -a 0.9 -b 0.9 -c 1.0 -d 0.9 &
+
