@@ -29,3 +29,19 @@ nohup python feature_disentangle.py -dv cuda:1 -n f23 -h_rep True -loss2bert Tru
 nohup python feature_disentangle.py -dv cuda:2 -n f24 -h_rep True -loss2bert True -d_lr 3e-4 -g_lr 3e-6 -d_extra 0.2 -fst_d_extra 0.6 &
 nohup python feature_disentangle.py -dv cuda:0 -n f25 -h_rep True -loss2bert True -d_lr 3e-4 -g_lr 3e-6 -d_extra 0.2 -fst_d_extra 0.6 &
 nohup python feature_disentangle.py -dv cuda:1 -n f26 -h_rep False -loss2bert True -d_lr 3e-4 -g_lr 3e-6 -d_extra 0.2 -fst_d_extra 0.6 &
+
+nohup python feature_disentangle.py -dv cuda:0 -n f27 -h_rep True -loss2bert True -fst_d_extra 0.8 -d_extra 0.4 -d_lr 3e-3 -g_lr 3e-6 &
+nohup python feature_disentangle.py -dv cuda:1 -n f28 -h_rep True -loss2bert True -fst_d_extra 1.0 -d_extra 0.4 -d_lr 3e-3 -g_lr 3e-6 &
+nohup python feature_disentangle.py -dv cuda:2 -n f29 -h_rep True -loss2bert True -fst_d_extra 1.0 -d_extra 0.4 -d_lr 3e-2 -g_lr 3e-6 &
+nohup python feature_disentangle.py -dv cuda:2 -n f30 -h_rep True -loss2bert True -fst_d_extra 0.8 -d_extra 0.4 -d_lr 1e-3 -g_lr 3e-6 &
+
+nohup python feature_disentangle.py -dv cuda:0 -n f31 -h_rep True -loss2bert True -fst_d_extra 0.6 -d_extra 0.2 -d_clip True -d_lr 3e-4 -g_lr 3e-6 &
+nohup python feature_disentangle.py -dv cuda:1 -n f32 -h_rep True -loss2bert True -fst_d_extra 0.6 -d_extra 0.2 -d_clip False -d_lr 5e-4 -g_lr 3e-6 &
+nohup python feature_disentangle.py -dv cuda:2 -n f33 -h_rep True -loss2bert True -fst_d_extra 0.6 -d_extra 0.2 -d_clip False -d_lr 3e-4 -g_lr 3e-6 &
+
+nohup python feature_disentangle.py -dv cuda:2 -n f34 -h_rep True -loss2bert True -fst_d_extra 0.6 -d_extra 0.2 -d_clip False -d_lr 3e-4 -g_lr 3e-6 &
+nohup python feature_disentangle.py -dv cuda:2 -n f35 -h_rep True -loss2bert True -fst_d_extra 0.6 -d_extra 0.2 -d_clip False -d_lr 3e-4 -g_lr 3e-6 &
+
+nohup python feature_disentangle.py -dv cuda:0 -n p1 -a 1.0 -b 1.0 -c 1.0 -d 1.0 &
+nohup python feature_disentangle.py -dv cuda:1 -n p2 -a 0.8 -b 0.8 -c 1.0 -d 0.8 &
+nohup python feature_disentangle.py -dv cuda:2 -n p3 -a 0.6 -b 0.6 -c 1.0 -d 0.6 &
