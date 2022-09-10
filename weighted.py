@@ -30,6 +30,7 @@ if __name__ == '__main__':
 
     device = "cuda:0"
     filepath = "./models/sampling/"
+    conf.CLASSNUM = 2
 
     # device = args.device
     # filepath = args.filepath
@@ -65,11 +66,11 @@ if __name__ == '__main__':
          'weight_decay': 0.0}
     ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=3e-6)
-    # class_map = {}
-    # if conf.CLASSNUM == 7:
-    #     class_map = conf.MULTI_CLASS_MAP
-    # elif conf.CLASSNUM == 2:
-    #     class_map = conf.BIN_CLASS_MAP
+    class_map = {}
+    if conf.CLASSNUM == 7:
+        class_map = conf.MULTI_CLASS_MAP
+    elif conf.CLASSNUM == 2:
+        class_map = conf.BIN_CLASS_MAP
     # weight_loss = compute_class_weight('balanced', classes=list(class_map.keys()), y=train_set.data[:, 1])
     # weight = torch.tensor(weight_loss, device=device, dtype=torch.float)
     # loss_fn = CrossEntropyLoss(weight)

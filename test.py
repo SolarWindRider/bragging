@@ -18,7 +18,7 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # conf.MODLENAME = args.model_name
     # conf.LM = args.language_model
-
+    conf.CLASSNUM = 2
     # device = args.device
     # tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     # model = MyModel(tokenizer.vocab_size, conf).load_state_dict(torch.load(f"./models/{conf.MODLENAME}"))
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     # model.load_state_dict(torch.load(f"./models/nrc/{conf.MODLENAME}.pt", map_location=device))
     # model.load_state_dict(torch.load(f"./models/sampling/40epochs_finished_sampling0_noseed_weight.pt", map_location=device))
     # model.load_state_dict(torch.load(f"./models/weighted/40epochs_finished_nrc_7class.pt", map_location=device))
-    model.load_state_dict(torch.load(f"./models/sampling/best_loss_train_sp2rand4ep.pt", map_location=device))
+    model.load_state_dict(torch.load(f"./models/sampling/50epochs_finished_xxx.pt", map_location=device))
     model.to(device)
 
     dataset = MyDataset(tokenizer, conf, False)

@@ -1,7 +1,7 @@
 from nrclex import NRCLex
 from torch.utils.data import Dataset, DataLoader
-from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, Sequential, MSELoss, KLDivLoss, \
-    CrossEntropyLoss, BCELoss, Sigmoid, Tanh, GELU
+from torch.nn import Module, Linear, Dropout, ReLU, Parameter, LayerNorm, \
+    Sequential, MSELoss, KLDivLoss, CrossEntropyLoss, BCELoss, Sigmoid, Tanh, GELU
 from torch.nn import functional as F
 from torch.nn.init import xavier_uniform_
 import torch
@@ -15,7 +15,6 @@ import numpy as np
 from collections import Iterator
 from math import ceil
 from sklearn.metrics import precision_score, recall_score, f1_score
-import conf
 
 
 # ----------------------------没有验证集----------------------------------------
@@ -194,6 +193,48 @@ def get_loss_fig(loss_train_path="loss_train.pt"):
     plt.show()
 
 
+# ----------------------------------每次采样，每种类别各采10个-------------------------
+class TsneData(Dataset):
+    def __init__(self, tokenizer, conf, istrain):
+        """
+        :param tokenizer: 传入已经实例化完成的tokenizer
+        :param conf: obj 传入配置文件
+        :param istrain: bool 是否载入训练数据
+        :param label: str 训练数据的具体类别， 只有istrain为True时才需要传入这个参数
+        """
+        self.tokenizer = tokenizer
+        self.conf = conf
+        self.istrain = istrain
+        # 读取数据
+        df = pd.read_csv(self.conf.DATAPATH)
+        if self.conf.CLASSNUM == 7:
+            self.keymap = self.conf.MULTI_CLASS_MAP
+        if istrain is not False:
+            raise Exception("istrain should be false")
+        random.seed(self.conf.RANDSEED)
+        self.data = np.array([['text', 'label']])
+        for k in self.keymap.keys():
+            v = df[(df["sampling"] == "random") & (df["label"] == k)][["text", "label"]].values
+            if k is not "affiliation":  # 只有5个样本
+                idx = random.sample(range(len(v)), 10)
+                self.data = np.concatenate((self.data, v[idx, :]), axis=0)
+            else:
+                self.data = np.concatenate((self.data, v), axis=0)
+                self.data = np.concatenate((self.data, v), axis=0)
+        self.data = self.data[1:]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, item):
+        label = torch.tensor(self.keymap[self.data[item % len(self.data)][1]])
+        inputs = self.tokenizer(self.data[item % len(self.data)][0], return_tensors="pt",
+                                max_length=self.conf.MAXLENGTH, padding="max_length",
+                                truncation=True)
+        inputs = inputs.to(self.conf.DEVICE)
+        return inputs, label  # 注意，label不放在GPU里面
+
+
 # ------------设置seed-----------------------------------------------------------------
 def seed_all(seed_value):
     # random.seed(seed_value)  # Python
@@ -224,8 +265,18 @@ class GanData(Dataset):
         self.istrain = istrain
         # 读取数据
         df = pd.read_csv(self.conf.DATAPATH)
+        if self.conf.CLASSNUM == 7:
+            self.keymap = self.conf.MULTI_CLASS_MAP
+        elif self.conf.CLASSNUM == 2:
+            self.keymap = self.conf.BIN_CLASS_MAP
         if istrain is True:
-            self.data = df[(df["sampling"] == "keyword") & (df["label"] == label)][["text", "label"]].values
+            if self.conf.CLASSNUM == 7:
+                self.data = df[(df["sampling"] == "keyword") & (df["label"] == label)][["text", "label"]].values
+            if self.conf.CLASSNUM == 2:
+                if label is "not":
+                    self.data = df[(df["sampling"] == "keyword") & (df["label"] == label)][["text", "label"]].values
+                else:
+                    self.data = df[(df["sampling"] == "keyword") & (df["label"] != label)][["text", "label"]].values
         elif istrain is False:
             self.data = df[df["sampling"] == "random"][["text", "label"]].values
 
@@ -245,7 +296,7 @@ class GanData(Dataset):
             inputs = inputs.to(self.conf.DEVICE)
             return inputs
         elif self.istrain is False:
-            label = torch.tensor(self.conf.MULTI_CLASS_MAP[self.data[item % len(self.data)][1]])
+            label = torch.tensor(self.keymap[self.data[item % len(self.data)][1]])
             inputs = self.tokenizer(self.data[item % len(self.data)][0], return_tensors="pt",
                                     max_length=self.conf.MAXLENGTH, padding="max_length",
                                     truncation=True)
@@ -255,8 +306,13 @@ class GanData(Dataset):
 
 class GanTrainDataLoader(Iterator):
     def __init__(self, tokenizer, conf):
+        self.conf = conf
         self.dataloaders = []
-        for k in conf.MULTI_CLASS_MAP.keys():
+        if self.conf.CLASSNUM == 7:
+            keymap = self.conf.MULTI_CLASS_MAP.keys()
+        elif self.conf.CLASSNUM == 2:
+            keymap = ["not", "yes"]
+        for k in keymap:
             self.dataloaders.append(
                 iter(DataLoader(GanData(tokenizer, conf, istrain=True, label=k), batch_size=conf.BATCHSIZE,
                                 shuffle=True)))
@@ -268,7 +324,7 @@ class GanTrainDataLoader(Iterator):
         return output
 
     def __len__(self):
-        return ceil(2838 * conf.EPOCHS / conf.BATCHSIZE)
+        return ceil(2838 * self.conf.EPOCHS / self.conf.BATCHSIZE)
 
 
 # -----------------------每次采样，一个batch为32，28个----------------------------------------------
@@ -352,7 +408,7 @@ class Generator(Module):
         self.mlp_t = Sequential(Linear(self.conf.FeatureDim, 1024), Tanh(), Linear(1024, 512), Tanh(), Dropout(),
                                 Linear(512, 1024), Tanh(), Dropout(), Linear(1024, self.conf.FeatureDim))
 
-        self.clf = Sequential(Linear(1024, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
+        self.clf = Sequential(Linear(self.conf.FeatureDim, 256), Tanh(), Linear(256, self.conf.CLASSNUM))
         if self.conf.isMLPinit is True:
             xavier_uniform_(self.linear.weight)
             for m in self.mlp_c.modules():
@@ -365,8 +421,8 @@ class Generator(Module):
                 if isinstance(m, Linear):
                     xavier_uniform_(m.weight)
         # 损失函数定义在模型类的内部
-        self.KLloss_c = KLDivLoss(reduction="batchmean", log_target=True)
-        self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
+        # self.KLloss_c = KLDivLoss(reduction="batchmean", log_target=True)
+        # self.KLloss_t = KLDivLoss(reduction="batchmean", log_target=True)
         self.CEloss_clf = CrossEntropyLoss()
 
     def forward(self, inputs, mode="Train"):
@@ -377,6 +433,8 @@ class Generator(Module):
 
         if mode is "test":
             cls = self.bert_cls_layer(inputs)
+            if self.conf.LMoutput:
+                return cls
             cls = self.linear(cls)  # shape (batch, FeatureDim)
             cls = self.dropout(cls)
             pred = self.clf(cls)
@@ -447,12 +505,12 @@ class Generator(Module):
                 if self.conf.isClassShuffle is True:
                     random.shuffle(shuffleidx)  # 打开或关闭shuffle
                 for i in range(self.conf.CLASSNUM):
-                    klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[shuffleidx[i]]["h_c"]),
-                                              F.log_softmax(disentangle_combined_features["h_hat_c"][shuffleidx[i]],
-                                                            dim=1))
-                    klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[shuffleidx[i]]["h_t"]),
-                                              F.log_softmax(disentangle_combined_features["h_hat_t"][shuffleidx[i]],
-                                                            dim=1))
+                    # klloss_c += self.KLloss_c(F.log_softmax(disentangled_features[shuffleidx[i]]["h_c"]),
+                    #                           F.log_softmax(disentangle_combined_features["h_hat_c"][shuffleidx[i]],
+                    #                                         dim=1))
+                    # klloss_t += self.KLloss_t(F.log_softmax(disentangled_features[shuffleidx[i]]["h_t"]),
+                    #                           F.log_softmax(disentangle_combined_features["h_hat_t"][shuffleidx[i]],
+                    #                                         dim=1))
                     celoss_clf += self.CEloss_clf(self.clf(combined_features[shuffleidx[i]]["h_rep"][0]),
                                                   # h_rep输入数据的特征向量，每个类别只有一个
                                                   torch.tensor([shuffleidx[i] for _ in range(self.conf.BATCHSIZE)],
@@ -464,8 +522,8 @@ class Generator(Module):
                                                                    dtype=torch.long,
                                                                    device=self.conf.DEVICE))
 
-                klloss_c /= self.conf.CLASSNUM
-                klloss_t /= self.conf.CLASSNUM
+                # klloss_c /= self.conf.CLASSNUM
+                # klloss_t /= self.conf.CLASSNUM
                 celoss_clf /= self.conf.CLASSNUM ** 2
 
                 return klloss_c, klloss_t, celoss_clf, combined_features
@@ -529,6 +587,7 @@ class Discrimitor(Module):
             celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1))  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
         return celoss_d
 
+
 # ------------------Cross Entropy -----------------------------------------------------
 # class Discrimitor(Module):
 #     def __init__(self, conf):
@@ -571,3 +630,35 @@ class Discrimitor(Module):
 #
 #             celoss_d /= (self.conf.CLASSNUM * (self.conf.CLASSNUM - 1))  # 这里实际就等效于d_loss = d_loss_real + d_loss_fake
 #         return celoss_d
+
+# ----------------------save check point--------------------------------------------------
+def savecheckpoint(conf, total_step, tokenizer, generator, discriminitor, logging, writer, best_macroF1, filepath):
+    if total_step >= ceil(2838 / conf.BATCHSIZE * conf.EPOCHS * 0.25):
+        if total_step % 500 == 0:  # 加载测试
+            test_set = GanData(tokenizer, conf, istrain=False)
+            test_loader = DataLoader(test_set, batch_size=64)
+
+            generator.eval()
+            with torch.no_grad():
+                pred, truth = [], []
+                for (inputs, labels) in test_loader:
+                    _ = generator(inputs, mode='test')
+                    pred_label = torch.argmax(_, dim=-1)
+                    truth += list(labels.numpy())
+                    pred += list(pred_label.cpu().numpy())
+
+            for average in ["micro", "macro"]:
+                P = precision_score(truth, pred, average=average)
+                R = recall_score(truth, pred, average=average)
+                F1 = f1_score(truth, pred, average=average)
+                print(f"g_{conf.MODLENAME}_{total_step}_{average} [P: {P:6.3%}, R: {R:6.3%}, F1: {F1:6.3%}]")
+                logging.info(f"g_{conf.MODLENAME}_{total_step}_{average} [P: {P:6.3%}, R: {R:6.3%}, F1: {F1:6.3%}]")
+                if average is "macro":
+                    writer.add_scalar("F1", F1, total_step)
+                    if F1 > best_macroF1:
+                        best_macroF1 = F1
+                        torch.save(generator.state_dict(), f"{filepath}/g_{conf.MODLENAME}_bestf1.pt")
+                        # torch.save(discriminitor.state_dict(), f"{filepath}/d_{conf.MODLENAME}_bestf1.pt")
+                        print(f"best f1 model saved, step {total_step}")
+                        logging.info(f"best f1 model saved, step {total_step}")
+    return best_macroF1

@@ -1,103 +1,84 @@
-from utils import SimpleBertModel, seed_all, GanTrainDataLoader
+import random
+import numpy as np
+import pandas as pd
+from utils import TsneData, Generator
 from transformers import AutoTokenizer
-from torch.optim import AdamW
-from torch.nn import CrossEntropyLoss
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
+from sklearn.manifold import TSNE
 import conf
 from tqdm import tqdm
-import argparse
 import torch
-import logging
-import warnings
+from matplotlib import pyplot as plt
+import seaborn as sns
 
-warnings.filterwarnings("ignore")
+conf.LMoutput = True
+device = "cuda:0"
 
-if __name__ == '__main__':
-    # 单卡单模型训练
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("-dv", "--device", help="which device to load model and data", type=str)
-    # parser.add_argument("-lm", "--languagemodel", help="pretrained language model name", type=str)
-    # parser.add_argument("-n", "--model_name", help="model name to save", type=str)
-    # parser.add_argument("-c", "--classnum", help="how many classes to classify", type=int, default=7)
-    # parser.add_argument("-fp", "--filepath", help="filepath to save trained model", type=str)
-    # parser.add_argument("-lf", "--linguestic_feature", help="filepath to save trained model", type=str, default=None)
-    # parser.add_argument("-sd", "--random_seed", help="set random seed", type=int)
-    # args = parser.parse_args()
+tokenizer = AutoTokenizer.from_pretrained(conf.LM)
+genertator = Generator(len(tokenizer), conf).to(device)
+genertator.load_state_dict(torch.load(f"./models/gan/g_p27.pt", map_location=device))
 
-    device = "cuda:0"
-    filepath = "./models/sampling/"
+conf.RANDSEED = 39763940
+test_set = TsneData(tokenizer, conf, istrain=False)
+test_loader = DataLoader(test_set, batch_size=70)
+genertator.eval()
+with torch.no_grad():
+    emb, truth = np.ones(shape=(1, 64001), dtype=np.float32), np.ones(shape=(1,), dtype=np.int64)
+    for inputs, labels in tqdm(test_loader):
+        for k in inputs.keys():
+            inputs[k] = inputs[k].to(device).squeeze()
+        truth = np.concatenate((truth, labels.cpu().numpy().squeeze()), axis=0)
+        outputs = genertator(inputs, mode="test")
+        emb = np.concatenate((emb, outputs.cpu().numpy().squeeze()), axis=0)
+emb = emb[1:, :]
+truth = np.expand_dims(truth[1:], axis=1)
+print("t-SNE start")
+ts = TSNE(early_exaggeration=16.0, n_components=2, init="pca", random_state=conf.RANDSEED, learning_rate="auto")
+emb = ts.fit_transform(emb)
+print("t-SNE finished")
 
-    # filepath = args.filepath
-    # conf.DEVICE = args.device
-    # conf.CLASSNUM = args.classnum
-    # conf.LM = args.languagemodel
-    # conf.MODLENAME = args.model_name
-    # conf.DATAPATH = "./dataset/bragging_data.csv"
-    # conf.LingFeature = args.linguestic_feature
-    # conf.RANDSEED = args.random_seed
+label_map = dict(zip(range(len(conf.MULTI_CLASS_MAP.keys())), list(conf.MULTI_CLASS_MAP.keys())))
+for _ in range(len(label_map)):
+    if _ == 0:
+        label_map[_] = "Not Bragging"
+    else:
+        label_map[_]= label_map[_].capitalize()
+data = np.concatenate((emb, truth), axis=1)
+df = pd.DataFrame(data, columns=["dim1", "dim2", "labels"])
+for _ in label_map.keys():  # DataFrame按条件筛选赋值
+    df.loc[df["labels"] == _, "labels"] = label_map[_]
 
-    seed_all(conf.RANDSEED)
-    writer = SummaryWriter(f'./runs/{conf.MODLENAME}')
-    logging.basicConfig(filename=f'./logs/sampling_{conf.MODLENAME}_{conf.CLASSNUM}class.log', level=logging.INFO)
+plt.figure(figsize=(16, 10))
+# plt.title("with no-bragging")
+ax = sns.scatterplot(data=df, x="dim1", y="dim2", hue="labels", palette="Paired", s=600)
 
-    tokenizer = AutoTokenizer.from_pretrained(conf.LM)
-    model = SimpleBertModel(tokenizer.vocab_size, conf).to(conf.DEVICE)
+handles, labels = ax.get_legend_handles_labels()
+# ax.legend(handles=handles[1:], labels=labels[1:], loc="upper left",
+#           markerscale=3.0, fontsize=25, bbox_to_anchor=(1.05, 1.0), borderaxespad=0.)
+ax.legend(loc="upper left",
+          markerscale=4.0, fontsize=25, bbox_to_anchor=(1.05, 1.0), borderaxespad=0.)
+linewidth = 4
+ax.spines['bottom'].set_linewidth(linewidth)  # 设置底部坐标轴的粗细
+ax.spines['left'].set_linewidth(linewidth)  # 设置左边坐标轴的粗细
+ax.spines['right'].set_linewidth(linewidth)  # 设置右边坐标轴的粗细
+ax.spines['top'].set_linewidth(linewidth)  # 设置上部坐标轴的粗细
+plt.tick_params(width=linewidth, length=10.)  # 设置刻度线的粗细
 
-    train_loader = GanTrainDataLoader(tokenizer, conf)
+plt.tight_layout()
+plt.xlabel("")
+plt.ylabel("")
+# plt.xticks([])
+# plt.yticks([])
+plt.gca().axes.xaxis.set_ticklabels([])
+plt.gca().axes.yaxis.set_ticklabels([])
+fig1 = plt.gcf()
+# fig1.savefig(f"./tsne_figs/seed-{conf.RANDSEED}-with-non-bragging.png")
+fig1.savefig(f"./base-with-non-bragging.png")
+fig1.clear()
 
-    param_optimizer = list(model.named_parameters())
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': 0.01},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-         'weight_decay': 0.0}
-    ]
-    optimizer = AdamW(optimizer_grouped_parameters, lr=3e-6)
-    loss_fn = CrossEntropyLoss(ignore_index=-100, reduction='mean')
-
-    logging.info("training start")
-    best_loss_train = 1e5
-    total_step = 0
-
-    model.train()
-    # for idx, inputs in enumerate(train_loader):
-    for inputs in tqdm(train_loader):
-        loss_train = 0.
-        # shuffleidx = [_ for _ in range(conf.CLASSNUM)]
-        # for _ in range(conf.CLASSNUM):
-        #     for k in inputs[shuffleidx[_]].keys():
-        #         inputs[shuffleidx[_]][k] = inputs[shuffleidx[_]][k].to(conf.DEVICE).squeeze()
-        #     labels = torch.tensor([shuffleidx[_] for i in range(conf.BATCHSIZE)],
-        #                           dtype=torch.long,
-        #                           device=conf.DEVICE)
-        #     outputs = model(inputs[shuffleidx[_]])
-
-        for _ in range(conf.CLASSNUM):
-            for k in inputs[_].keys():
-                inputs[_][k] = inputs[_][k].to(conf.DEVICE).squeeze()
-            labels = torch.tensor([_ for i in range(conf.BATCHSIZE)],
-                                  dtype=torch.long,
-                                  device=conf.DEVICE)
-            outputs = model(inputs[_])
-
-            loss_train_ = loss_fn(outputs, labels)
-            loss_train = loss_train_.item()
-            optimizer.zero_grad()
-            loss_train_.backward()
-            optimizer.step()
-            loss_train += loss_train_
-
-        loss_train /= conf.CLASSNUM
-        writer.add_scalar("loss_train", loss_train, total_step)
-        total_step += 1
-        if total_step % (conf.BATCHSIZE * conf.EPOCHS) == 0:
-            if loss_train < best_loss_train:
-                best_loss_train = loss_train
-                torch.save(model.state_dict(),
-                           f"{filepath}/best_loss_train_{conf.MODLENAME}.pt")
-                logging.info(f"best_loss_train model saved, loss: {best_loss_train}")
-
-    torch.save(model.state_dict(),
-               f"{filepath}/{total_step}steps_finished_{conf.MODLENAME}_{conf.CLASSNUM}class.pt")
-    logging.info(f"training finished. model saved")
+# plt.figure(figsize=(16, 10))
+# plt.title("without non-bragging")
+# sns.scatterplot(data=df[df["labels"] != "non-bragging"], x="dim1", y="dim2", hue="labels", palette="Paired")
+# fig2 = plt.gcf()
+# fig2.savefig(f"./tsne_figs/seed-{conf.RANDSEED}-without-non-bragging.png")
+# fig2.clear()

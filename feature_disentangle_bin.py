@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
     tokenizer = AutoTokenizer.from_pretrained(conf.LM)
     generator = Generator(len(tokenizer), conf).to(conf.DEVICE)
-    discriminitor = Discrimitor(conf).to(conf.DEVICE)
+    # discriminitor = Discrimitor(conf).to(conf.DEVICE)
 
     train_loader = GanTrainDataLoader(tokenizer, conf)
 
@@ -94,7 +94,7 @@ if __name__ == '__main__':
         {'params': [p for n, p in generator.named_parameters() if any(nd in n for nd in no_decay)],
          'weight_decay': 0.0}
     ]
-    d_optimizer = AdamW(discriminitor.parameters(), lr=d_lr)
+    # d_optimizer = AdamW(discriminitor.parameters(), lr=d_lr)
     # g_optimizer = AdamW([{"params": genertator.mlp_c.parameters(), "lr": 3e-4},
     #                      {"params": genertator.mlp_t.parameters(), "lr": 3e-4},
     #                      {"params": genertator.clf.parameters(), "lr": 3e-4},
@@ -104,7 +104,7 @@ if __name__ == '__main__':
 
 
     def reset_grad():
-        d_optimizer.zero_grad()
+        # d_optimizer.zero_grad()
         g_optimizer.zero_grad()
 
 
@@ -115,46 +115,49 @@ if __name__ == '__main__':
     # for idx, inputs in enumerate(train_loader):
     for inputs in tqdm(train_loader):
         generator.train()
-        discriminitor.train()
+        # discriminitor.train()
         # ================================================================== #
         #                      Train the discriminator                       #
         # ================================================================== #
         klloss_c, klloss_t, celoss_clf, combined_features = generator(inputs, mode="train")
-        loss_D = discriminitor(combined_features, trainmode="dis")
-        reset_grad()
-        loss_D.backward(retain_graph=True)
-        if d_clip is True:
-            clip_grad_value_(discriminitor.parameters(), 1.0)  # 对鉴别器进行梯度裁剪
-        d_optimizer.step()
-        writer.add_scalar("loss_D", loss_D.item(), total_step)
-        if total_step < ceil(2838 / conf.BATCHSIZE * fst_d_extra):
-            total_step += 1  # 第一个epoch多训练鉴别器
-            continue
-        elif total_step % ceil(2838 / conf.BATCHSIZE) < ceil(2838 / conf.BATCHSIZE * d_extra):
-            best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, discriminitor, logging, writer,
-                                          best_macroF1, filepath)
-            total_step += 1
-            continue
+        # loss_D = discriminitor(combined_features, trainmode="dis")
+        # reset_grad()
+        # loss_D.backward(retain_graph=True)
+        # if d_clip is True:
+        #     clip_grad_value_(discriminitor.parameters(), 1.0)  # 对鉴别器进行梯度裁剪
+        # d_optimizer.step()
+        # writer.add_scalar("loss_D", loss_D.item(), total_step)
+        # if total_step < ceil(2838 / conf.BATCHSIZE * fst_d_extra):
+        #     total_step += 1  # 第一个epoch多训练鉴别器
+        #     continue
+        # elif total_step % ceil(2838 / conf.BATCHSIZE) < ceil(2838 / conf.BATCHSIZE * d_extra):
+        #     best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, discriminitor, logging, writer,
+        #                                   best_macroF1, filepath)
+        #     total_step += 1
+        #     continue
 
         # ================================================================== #
         #                        Train the generator                         #
         # ================================================================== #
-        loss_g = discriminitor(combined_features, trainmode="gen")
-        loss_G = conf.a * klloss_c + conf.b * klloss_t + conf.c * celoss_clf + conf.d * loss_g
+        # loss_g = discriminitor(combined_features, trainmode="gen")
+        # loss_G = conf.a * klloss_c + conf.b * klloss_t + conf.c * celoss_clf + conf.d * loss_g
+        loss_G = conf.a * klloss_c + conf.b * klloss_t + conf.c * celoss_clf
         reset_grad()
         loss_G.backward()
         g_optimizer.step()
         writer.add_scalar("klloss_c", klloss_c.item(), total_step)
         writer.add_scalar("klloss_t", klloss_t.item(), total_step)
         writer.add_scalar("celoss_clf", celoss_clf.item(), total_step)
-        writer.add_scalar("loss_g", loss_g.item(), total_step)
+        # writer.add_scalar("loss_g", loss_g.item(), total_step)
         writer.add_scalar("loss_G", loss_G.item(), total_step)
 
-        best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, discriminitor, logging, writer,
+        best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, None, logging, writer,
                                       best_macroF1, filepath)
+        # best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, discriminitor, logging, writer,
+        #                               best_macroF1, filepath)
         total_step += 1
 
     torch.save(generator.state_dict(), f"{filepath}/g_{conf.MODLENAME}.pt")
-    torch.save(discriminitor.state_dict(), f"{filepath}/d_{conf.MODLENAME}.pt")
+    # torch.save(discriminitor.state_dict(), f"{filepath}/d_{conf.MODLENAME}.pt")
     print(f"training finished, last step model saved")
     logging.info(f"training finished, last step model saved")

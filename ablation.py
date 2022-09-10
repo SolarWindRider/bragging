@@ -112,8 +112,8 @@ if __name__ == '__main__':
     logging.info("training start")
     total_step = 0
     best_macroF1 = 0.
-    # for idx, inputs in enumerate(train_loader):
-    for inputs in tqdm(train_loader):
+    for idx, inputs in enumerate(train_loader):
+        # for inputs in tqdm(train_loader):
         generator.train()
         discriminitor.train()
         # ================================================================== #
@@ -140,21 +140,20 @@ if __name__ == '__main__':
         #                        Train the generator                         #
         # ================================================================== #
         loss_g = discriminitor(combined_features, trainmode="gen")
-        loss_G = conf.a * klloss_c + conf.b * klloss_t + conf.c * celoss_clf + conf.d * loss_g
+        loss_G = 0 * klloss_c + 0 * klloss_t + conf.c * celoss_clf + conf.d * loss_g
         reset_grad()
         loss_G.backward()
         g_optimizer.step()
-        writer.add_scalar("klloss_c", klloss_c.item(), total_step)
-        writer.add_scalar("klloss_t", klloss_t.item(), total_step)
+        # writer.add_scalar("klloss_c", klloss_c.item(), total_step)
+        # writer.add_scalar("klloss_t", klloss_t.item(), total_step)
         writer.add_scalar("celoss_clf", celoss_clf.item(), total_step)
-        writer.add_scalar("loss_g", loss_g.item(), total_step)
         writer.add_scalar("loss_G", loss_G.item(), total_step)
 
-        best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, discriminitor, logging, writer,
+        best_macroF1 = savecheckpoint(conf, total_step, tokenizer, generator, None, logging, writer,
                                       best_macroF1, filepath)
         total_step += 1
 
     torch.save(generator.state_dict(), f"{filepath}/g_{conf.MODLENAME}.pt")
-    torch.save(discriminitor.state_dict(), f"{filepath}/d_{conf.MODLENAME}.pt")
+    # torch.save(discriminitor.state_dict(), f"{filepath}/d_{conf.MODLENAME}.pt")
     print(f"training finished, last step model saved")
     logging.info(f"training finished, last step model saved")
